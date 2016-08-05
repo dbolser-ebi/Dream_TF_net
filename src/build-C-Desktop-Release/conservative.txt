@@ -1,0 +1,305 @@
+Processing: ../../data/chipseq_labels/MAX.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/MAX.train.labels.tsv.gz"completed
+A549 GM12878: bound 0.124392 corr 0.254581
+A549 H1-hESC: bound 0.160653 corr 0.276237
+A549 HCT116: bound 0.260299 corr 0.40973
+A549 HeLa-S3: bound 0.226906 corr 0.372671
+A549 HepG2: bound 0.200574 corr 0.330232
+A549 K562: bound 0.179802 corr 0.300719
+A549 SK-N-SH: bound 0.225904 corr 0.36676
+GM12878 H1-hESC: bound 0.115217 corr 0.222279
+GM12878 HCT116: bound 0.114862 corr 0.240814
+GM12878 HeLa-S3: bound 0.128357 corr 0.242356
+GM12878 HepG2: bound 0.113754 corr 0.237926
+GM12878 K562: bound 0.126098 corr 0.261343
+GM12878 SK-N-SH: bound 0.119756 corr 0.235523
+H1-hESC HCT116: bound 0.16135 corr 0.278647
+H1-hESC HeLa-S3: bound 0.137044 corr 0.237945
+H1-hESC HepG2: bound 0.15322 corr 0.265973
+H1-hESC K562: bound 0.179058 corr 0.304815
+H1-hESC SK-N-SH: bound 0.13869 corr 0.240489
+HCT116 HeLa-S3: bound 0.231976 corr 0.381784
+HCT116 HepG2: bound 0.188305 corr 0.312687
+HCT116 K562: bound 0.188218 corr 0.312557
+HCT116 SK-N-SH: bound 0.209218 corr 0.345129
+HeLa-S3 HepG2: bound 0.157529 corr 0.274199
+HeLa-S3 K562: bound 0.165683 corr 0.286663
+HeLa-S3 SK-N-SH: bound 0.204847 corr 0.338322
+HepG2 K562: bound 0.17599 corr 0.294969
+HepG2 SK-N-SH: bound 0.145877 corr 0.252316
+K562 SK-N-SH: bound 0.154379 corr 0.265366
+Processing: ../../data/chipseq_labels/ARID3A.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/ARID3A.train.labels.tsv.gz"completed
+Processing: ../../data/chipseq_labels/EGR1.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/EGR1.train.labels.tsv.gz"completed
+GM12878 H1-hESC: bound 0.158555 corr 0.276355
+GM12878 HCT116: bound 0.141253 corr 0.270669
+GM12878 MCF-7: bound 0.143537 corr 0.251495
+H1-hESC HCT116: bound 0.111955 corr 0.23771
+H1-hESC MCF-7: bound 0.139682 corr 0.244676
+HCT116 MCF-7: bound 0.151373 corr 0.302175
+Processing: ../../data/chipseq_labels/MYC.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/MYC.train.labels.tsv.gz"completed
+A549 HeLa-S3: bound 0.186282 corr 0.321555
+A549 K562: bound 0.133182 corr 0.274435
+A549 MCF-7: bound 0.125961 corr 0.249285
+HeLa-S3 K562: bound 0.157546 corr 0.287236
+HeLa-S3 MCF-7: bound 0.176897 corr 0.308808
+K562 MCF-7: bound 0.158767 corr 0.272929
+Processing: ../../data/chipseq_labels/FOXA2.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/FOXA2.train.labels.tsv.gz"completed
+Processing: ../../data/chipseq_labels/SPI1.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/SPI1.train.labels.tsv.gz"completed
+Processing: ../../data/chipseq_labels/SRF.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/SRF.train.labels.tsv.gz"completed
+GM12878 H1-hESC: bound 0.133448 corr 0.246687
+GM12878 HCT116: bound 0.0725014 corr 0.172535
+GM12878 HepG2: bound 0.123064 corr 0.227876
+GM12878 K562: bound 0.15381 corr 0.285471
+H1-hESC HCT116: bound 0.047662 corr 0.145216
+H1-hESC HepG2: bound 0.15389 corr 0.266509
+H1-hESC K562: bound 0.190597 corr 0.320579
+HCT116 HepG2: bound 0.049305 corr 0.147096
+HCT116 K562: bound 0.0538333 corr 0.171915
+HepG2 K562: bound 0.15276 corr 0.265807
+Processing: ../../data/chipseq_labels/TEAD4.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/TEAD4.train.labels.tsv.gz"completed
+A549 H1-hESC: bound 0.0666055 corr 0.126628
+A549 HCT116: bound 0.14997 corr 0.260298
+A549 HepG2: bound 0.0774511 corr 0.149773
+A549 K562: bound 0.0431344 corr 0.0921477
+A549 SK-N-SH: bound 0.0966928 corr 0.192302
+H1-hESC HCT116: bound 0.102089 corr 0.186347
+H1-hESC HepG2: bound 0.0535015 corr 0.100072
+H1-hESC K562: bound 0.0494264 corr 0.0959108
+H1-hESC SK-N-SH: bound 0.0386744 corr 0.0739581
+HCT116 HepG2: bound 0.0717456 corr 0.13686
+HCT116 K562: bound 0.0636846 corr 0.130572
+HCT116 SK-N-SH: bound 0.104276 corr 0.201136
+HepG2 K562: bound 0.0490369 corr 0.0926243
+HepG2 SK-N-SH: bound 0.0462042 corr 0.0864637
+K562 SK-N-SH: bound 0.0451867 corr 0.0836498
+Processing: ../../data/chipseq_labels/ATF3.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/ATF3.train.labels.tsv.gz"completed
+H1-hESC HCT116: bound 0.0556353 corr 0.127293
+H1-hESC HepG2: bound 0.233609 corr 0.388839
+H1-hESC K562: bound 0.0210978 corr 0.0864433
+HCT116 HepG2: bound 0.0426195 corr 0.114669
+HCT116 K562: bound 0.0803222 corr 0.18912
+HepG2 K562: bound 0.0149582 corr 0.0762804
+Processing: ../../data/chipseq_labels/CTCF.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/CTCF.train.labels.tsv.gz"completed
+A549 H1-hESC: bound 0.429768 corr 0.612333
+A549 HeLa-S3: bound 0.522898 corr 0.687201
+A549 HepG2: bound 0.516506 corr 0.681927
+A549 IMR-90: bound 0.55949 corr 0.716837
+A549 K562: bound 0.509674 corr 0.676748
+A549 MCF-7: bound 0.404131 corr 0.594295
+H1-hESC HeLa-S3: bound 0.44853 corr 0.623371
+H1-hESC HepG2: bound 0.471715 corr 0.64489
+H1-hESC IMR-90: bound 0.398073 corr 0.583286
+H1-hESC K562: bound 0.438247 corr 0.611683
+H1-hESC MCF-7: bound 0.459924 corr 0.629135
+HeLa-S3 HepG2: bound 0.542888 corr 0.702549
+HeLa-S3 IMR-90: bound 0.483518 corr 0.653631
+HeLa-S3 K562: bound 0.497916 corr 0.66359
+HeLa-S3 MCF-7: bound 0.4908 corr 0.669624
+HepG2 IMR-90: bound 0.474457 corr 0.645663
+HepG2 K562: bound 0.521291 corr 0.68411
+HepG2 MCF-7: bound 0.481839 corr 0.660525
+IMR-90 K562: bound 0.476277 corr 0.648405
+IMR-90 MCF-7: bound 0.376537 corr 0.568863
+K562 MCF-7: bound 0.427718 corr 0.606475
+Processing: ../../data/chipseq_labels/YY1.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/YY1.train.labels.tsv.gz"completed
+GM12878 H1-hESC: bound 0.187693 corr 0.319012
+GM12878 HCT116: bound 0.149217 corr 0.300674
+GM12878 HepG2: bound 0.20307 corr 0.341595
+GM12878 SK-N-SH: bound 0.18576 corr 0.322367
+H1-hESC HCT116: bound 0.156514 corr 0.289706
+H1-hESC HepG2: bound 0.179272 corr 0.302227
+H1-hESC SK-N-SH: bound 0.181368 corr 0.306474
+HCT116 HepG2: bound 0.186709 corr 0.335892
+HCT116 SK-N-SH: bound 0.205561 corr 0.355431
+HepG2 SK-N-SH: bound 0.207865 corr 0.343579
+Processing: ../../data/chipseq_labels/ATF7.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/ATF7.train.labels.tsv.gz"completed
+GM12878 HepG2: bound 0.0616251 corr 0.112624
+GM12878 K562: bound 0.10318 corr 0.183558
+HepG2 K562: bound 0.0609424 corr 0.113241
+Processing: ../../data/chipseq_labels/ATF2.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/ATF2.train.labels.tsv.gz"completed
+GM12878 H1-hESC: bound 0.0518994 corr 0.109403
+GM12878 MCF-7: bound 0.0185004 corr 0.0351829
+H1-hESC MCF-7: bound 0.0275697 corr 0.0529781
+Processing: ../../data/chipseq_labels/EP300.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/EP300.train.labels.tsv.gz"completed
+GM12878 H1-hESC: bound 0.0206682 corr 0.0406136
+GM12878 HeLa-S3: bound 0.0243318 corr 0.04519
+GM12878 HepG2: bound 0.0235933 corr 0.0438732
+GM12878 K562: bound 0.0350607 corr 0.0654219
+GM12878 SK-N-SH: bound 0.0249063 corr 0.0487587
+H1-hESC HeLa-S3: bound 0.012889 corr 0.0256676
+H1-hESC HepG2: bound 0.0391826 corr 0.0810528
+H1-hESC K562: bound 0.0453099 corr 0.0901196
+H1-hESC SK-N-SH: bound 0.0319971 corr 0.0745331
+HeLa-S3 HepG2: bound 0.0572081 corr 0.105464
+HeLa-S3 K562: bound 0.0574767 corr 0.106419
+HeLa-S3 SK-N-SH: bound 0.0727146 corr 0.137092
+HepG2 K562: bound 0.054411 corr 0.101093
+HepG2 SK-N-SH: bound 0.0419723 corr 0.079046
+K562 SK-N-SH: bound 0.0520899 corr 0.101408
+Processing: ../../data/chipseq_labels/FOXA1.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/FOXA1.train.labels.tsv.gz"completed
+Processing: ../../data/chipseq_labels/TCF12.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/TCF12.train.labels.tsv.gz"completed
+GM12878 H1-hESC: bound 0.0573666 corr 0.114068
+GM12878 MCF-7: bound 0.0254867 corr 0.0483707
+GM12878 SK-N-SH: bound 0.0352415 corr 0.079058
+H1-hESC MCF-7: bound 0.0216537 corr 0.0423119
+H1-hESC SK-N-SH: bound 0.0185362 corr 0.0533882
+MCF-7 SK-N-SH: bound 0.032968 corr 0.0802721
+Processing: ../../data/chipseq_labels/CEBPB.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/CEBPB.train.labels.tsv.gz"completed
+A549 H1-hESC: bound 0.170799 corr 0.318142
+A549 HCT116: bound 0.101803 corr 0.182075
+A549 HeLa-S3: bound 0.25066 corr 0.406598
+A549 HepG2: bound 0.340604 corr 0.506281
+A549 IMR-90: bound 0.312192 corr 0.488058
+A549 K562: bound 0.162238 corr 0.292034
+H1-hESC HCT116: bound 0.0744494 corr 0.146708
+H1-hESC HeLa-S3: bound 0.113921 corr 0.245822
+H1-hESC HepG2: bound 0.166704 corr 0.310123
+H1-hESC IMR-90: bound 0.12294 corr 0.269847
+H1-hESC K562: bound 0.0885038 corr 0.211831
+HCT116 HeLa-S3: bound 0.147647 corr 0.262825
+HCT116 HepG2: bound 0.0672254 corr 0.122924
+HCT116 IMR-90: bound 0.0926362 corr 0.173546
+HCT116 K562: bound 0.0706772 corr 0.138232
+HeLa-S3 HepG2: bound 0.186007 corr 0.317939
+HeLa-S3 IMR-90: bound 0.252586 corr 0.400003
+HeLa-S3 K562: bound 0.132445 corr 0.230979
+HepG2 IMR-90: bound 0.261693 corr 0.426102
+HepG2 K562: bound 0.149679 corr 0.273115
+IMR-90 K562: bound 0.149956 corr 0.256807
+Processing: ../../data/chipseq_labels/TAF1.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/TAF1.train.labels.tsv.gz"completed
+GM12878 H1-hESC: bound 0.180269 corr 0.325801
+GM12878 HeLa-S3: bound 0.217058 corr 0.355815
+GM12878 K562: bound 0.220288 corr 0.362373
+GM12878 SK-N-SH: bound 0.231362 corr 0.374849
+H1-hESC HeLa-S3: bound 0.189089 corr 0.334905
+H1-hESC K562: bound 0.219002 corr 0.369656
+H1-hESC SK-N-SH: bound 0.19944 corr 0.357932
+HeLa-S3 K562: bound 0.225287 corr 0.367704
+HeLa-S3 SK-N-SH: bound 0.249187 corr 0.398643
+K562 SK-N-SH: bound 0.229608 corr 0.37603
+Processing: ../../data/chipseq_labels/JUND.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/JUND.train.labels.tsv.gz"completed
+HCT116 HeLa-S3: bound 0.176273 corr 0.297687
+HCT116 HepG2: bound 0.0887905 corr 0.160179
+HCT116 K562: bound 0.146093 corr 0.252145
+HCT116 MCF-7: bound 0.117466 corr 0.224619
+HCT116 SK-N-SH: bound 0.151891 corr 0.26093
+HeLa-S3 HepG2: bound 0.146241 corr 0.252551
+HeLa-S3 K562: bound 0.137703 corr 0.23949
+HeLa-S3 MCF-7: bound 0.098846 corr 0.18783
+HeLa-S3 SK-N-SH: bound 0.173901 corr 0.295191
+HepG2 K562: bound 0.104725 corr 0.186697
+HepG2 MCF-7: bound 0.0626814 corr 0.122674
+HepG2 SK-N-SH: bound 0.0820274 corr 0.148983
+K562 MCF-7: bound 0.0701183 corr 0.137791
+K562 SK-N-SH: bound 0.0964916 corr 0.173089
+MCF-7 SK-N-SH: bound 0.0746695 corr 0.150034
+Processing: ../../data/chipseq_labels/GABPA.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/GABPA.train.labels.tsv.gz"completed
+GM12878 H1-hESC: bound 0.150756 corr 0.276299
+GM12878 HeLa-S3: bound 0.333811 corr 0.501966
+GM12878 HepG2: bound 0.25846 corr 0.446034
+GM12878 MCF-7: bound 0.155143 corr 0.338545
+GM12878 SK-N-SH: bound 0.202511 corr 0.387212
+H1-hESC HeLa-S3: bound 0.142343 corr 0.25661
+H1-hESC HepG2: bound 0.137224 corr 0.241274
+H1-hESC MCF-7: bound 0.101131 corr 0.19562
+H1-hESC SK-N-SH: bound 0.113766 corr 0.207779
+HeLa-S3 HepG2: bound 0.252577 corr 0.425197
+HeLa-S3 MCF-7: bound 0.172675 corr 0.353733
+HeLa-S3 SK-N-SH: bound 0.224525 corr 0.405798
+HepG2 MCF-7: bound 0.223941 corr 0.381121
+HepG2 SK-N-SH: bound 0.264512 corr 0.421094
+MCF-7 SK-N-SH: bound 0.259527 corr 0.416808
+Processing: ../../data/chipseq_labels/MAFK.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/MAFK.train.labels.tsv.gz"completed
+GM12878 H1-hESC: bound 0.270361 corr 0.444547
+GM12878 HeLa-S3: bound 0.185609 corr 0.356899
+GM12878 HepG2: bound 0.0778067 corr 0.234643
+GM12878 IMR-90: bound 0.115235 corr 0.292712
+H1-hESC HeLa-S3: bound 0.191102 corr 0.328128
+H1-hESC HepG2: bound 0.102914 corr 0.24339
+H1-hESC IMR-90: bound 0.147478 corr 0.301301
+HeLa-S3 HepG2: bound 0.105074 corr 0.21683
+HeLa-S3 IMR-90: bound 0.172848 corr 0.312389
+HepG2 IMR-90: bound 0.333056 corr 0.50601
+Processing: ../../data/chipseq_labels/NANOG.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/NANOG.train.labels.tsv.gz"completed
+Processing: ../../data/chipseq_labels/RFX5.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/RFX5.train.labels.tsv.gz"completed
+GM12878 HeLa-S3: bound 0.060699 corr 0.172589
+GM12878 MCF-7: bound 0.150082 corr 0.28581
+GM12878 SK-N-SH: bound 0.146283 corr 0.280479
+HeLa-S3 MCF-7: bound 0.09043 corr 0.189166
+HeLa-S3 SK-N-SH: bound 0.105914 corr 0.217799
+MCF-7 SK-N-SH: bound 0.148012 corr 0.257073
+Processing: ../../data/chipseq_labels/E2F6.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/E2F6.train.labels.tsv.gz"completed
+A549 H1-hESC: bound 0.165472 corr 0.290189
+A549 HeLa-S3: bound 0.19481 corr 0.34143
+H1-hESC HeLa-S3: bound 0.115837 corr 0.239242
+Processing: ../../data/chipseq_labels/E2F1.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/E2F1.train.labels.tsv.gz"completed
+GM12878 HeLa-S3: bound 0.166423 corr 0.29407
+Processing: ../../data/chipseq_labels/STAT3.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/STAT3.train.labels.tsv.gz"completed
+Processing: ../../data/chipseq_labels/HNF4A.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/HNF4A.train.labels.tsv.gz"completed
+Processing: ../../data/chipseq_labels/TCF7L2.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/TCF7L2.train.labels.tsv.gz"completed
+HCT116 HeLa-S3: bound 0.16126 corr 0.284454
+HCT116 Panc1: bound 0.133743 corr 0.237763
+HeLa-S3 Panc1: bound 0.147343 corr 0.255301
+Processing: ../../data/chipseq_labels/GATA3.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/GATA3.train.labels.tsv.gz"completed
+A549 SK-N-SH: bound 0.0947187 corr 0.19177
+Processing: ../../data/chipseq_labels/ZNF143.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/ZNF143.train.labels.tsv.gz"completed
+GM12878 H1-hESC: bound 0.329008 corr 0.493941
+GM12878 HeLa-S3: bound 0.141383 corr 0.310823
+GM12878 HepG2: bound 0.307501 corr 0.493564
+H1-hESC HeLa-S3: bound 0.155946 corr 0.328522
+H1-hESC HepG2: bound 0.328857 corr 0.511882
+HeLa-S3 HepG2: bound 0.214309 corr 0.378483
+Processing: ../../data/chipseq_labels/REST.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/REST.train.labels.tsv.gz"completed
+H1-hESC HeLa-S3: bound 0.285693 corr 0.452834
+H1-hESC HepG2: bound 0.171732 corr 0.292288
+H1-hESC MCF-7: bound 0.234644 corr 0.380828
+H1-hESC Panc1: bound 0.152216 corr 0.268056
+H1-hESC SK-N-SH: bound 0.0939346 corr 0.17209
+HeLa-S3 HepG2: bound 0.187648 corr 0.320042
+HeLa-S3 MCF-7: bound 0.251268 corr 0.403542
+HeLa-S3 Panc1: bound 0.164316 corr 0.281611
+HeLa-S3 SK-N-SH: bound 0.0914684 corr 0.176341
+HepG2 MCF-7: bound 0.185401 corr 0.31256
+HepG2 Panc1: bound 0.157679 corr 0.275116
+HepG2 SK-N-SH: bound 0.117888 corr 0.21263
+MCF-7 Panc1: bound 0.159436 corr 0.275614
+MCF-7 SK-N-SH: bound 0.0922248 corr 0.172088
+Panc1 SK-N-SH: bound 0.167774 corr 0.301921
+Processing: ../../data/chipseq_labels/CREB1.train.labels.tsv.gz
+Reading TF "../../data/chipseq_labels/CREB1.train.labels.tsv.gz"completed
+GM12878 H1-hESC: bound 0.168007 corr 0.293683
+GM12878 HepG2: bound 0.165042 corr 0.281148
+GM12878 K562: bound 0.156193 corr 0.277438
+H1-hESC HepG2: bound 0.189435 corr 0.328487
+H1-hESC K562: bound 0.195089 corr 0.325273
+HepG2 K562: bound 0.163725 corr 0.292002

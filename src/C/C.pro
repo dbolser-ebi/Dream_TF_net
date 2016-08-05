@@ -9,7 +9,8 @@ CONFIG -= app_bundle
 
 TEMPLATE = app
 
-SOURCES += main.cpp
+SOURCES += main.cpp \
+    bound.cpp
 
 LIBS += \
        -lboost_system\
@@ -17,4 +18,7 @@ LIBS += \
        -lboost_iostreams\
        -lgsl\
        -lgslcblas\
+
+HEADERS += \
+    bound.h
 
