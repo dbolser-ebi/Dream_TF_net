@@ -6,20 +6,23 @@ from os import remove
 from bx.intervals.io import GenomicIntervalReader
 from bx.bbi.bigwig_file import BigWigFile
 
+
 # Low mem overhead splitting
 def split_iter(string):
     return (x.group(0) for x in re.finditer(r"[ \t\f\v0-9A-Za-z,.=']+", string))
 
+
 def get_wiggle_output(fpath):
     # Call wiggletools
-    process = Popen(["/run/media/niels/6d469c5d-2dc7-4079-b0bc-6880bb5c8387/WiggleTools/bin/wiggletools", fpath],
+    process = Popen(["wiggletools", fpath],
                     stdout=PIPE)
     (output, _) = process.communicate()
     return output
 
+
 def wiggleToBedGraph(fpath):
     # Call bigWigToBedGraph
-    process = call(['/run/media/niels/6d469c5d-2dc7-4079-b0bc-6880bb5c8387/userApps/bin/bigWigToBedGraph',
+    process = call(['bigWigToBedGraph',
                     fpath, fpath+'.bedGraph'])
     return fpath+'.bedGraph'
 
@@ -85,7 +88,7 @@ def get_peaks_from_bed(path_to_bed, path_to_wiggle):
              stdout=bedOut
              )
 
-    call(["/run/media/niels/6d469c5d-2dc7-4079-b0bc-6880bb5c8387/bwtool/bwtool",
+    call(["bwtool",
                      "extract",
                      "bed",
                      sorted_path,
