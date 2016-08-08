@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 from sklearn.cross_validation import StratifiedKFold
+import time
 
 
 def weight_variable(shape):
@@ -29,12 +30,30 @@ def calc_loss(logits, labels):
 
 def calc_val_acc(logits, labels):
     predictions = tf.nn.sigmoid(logits)
-    return
+    return tf.reduce_mean(tf.where(tf.abs(predictions-labels) < 0.5))
+
+
+class EarlyStopping:
+    def __init__(self, max_stalls):
+        self.best_acc = 0
+        self.num_stalls = 0
+        self.max_stalls = max_stalls
+
+    def update(self, acc):
+        if acc > self.best_acc:
+            self.num_stalls = 0
+            self.best_acc = acc
+            return 2
+        elif self.num_stalls < self.max_stalls:
+            self.num_stalls += 1
+            return 1
+        else:
+            return 0
 
 
 class ConvNet:
-    def __init__(self, model_dir, batch_size=128, num_channels=4, num_epochs=2,
-                 width=200, num_outputs=1, eval_size=0.2, verbose=True):
+    def __init__(self, model_dir, batch_size=256, num_channels=4, num_epochs=2,
+                 width=200, num_outputs=1, eval_size=0.2, early_stopping=100, verbose=True):
         self.num_outputs = num_outputs
         self.num_channels = num_channels
         self.height = 1
@@ -48,9 +67,10 @@ class ConvNet:
                                           width, self.num_channels),
                                           name='features')
         self.tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_outputs), name='labels')
-        self.dropout_rate = tf.placeholder(tf.float32)
+        self.keep_prob = tf.placeholder(tf.float32)
 
         self.logits = self.get_model()
+        self.early_stopping = EarlyStopping(max_stalls=early_stopping)
         self.transcription_factor = None
 
     def set_transcription_factor(self, transcription_factor):
@@ -81,10 +101,10 @@ class ConvNet:
 
         # Dropout
         with tf.variable_scope('dropout') as scope:
-            drop = tf.nn.dropout(fc1, self.dropout_rate)
+            drop = tf.nn.dropout(fc1, self.keep_prob)
 
         # Output
-        with tf.variable_scope('softmax') as scope:
+        with tf.variable_scope('output') as scope:
             fc_kernel2 = weight_variable([100, 1])
             fc_bias2 = bias_variable([1])
             logits = tf.matmul(drop, fc_kernel2) + fc_bias2
@@ -95,8 +115,9 @@ class ConvNet:
         summary_writer = tf.train.SummaryWriter(self.model_dir + 'train')
 
         loss = calc_loss(self.logits, self.tf_train_labels)
+        valid_acc = calc_val_acc(self.logits, self.tf_train_labels)
         optimizer = tf.train.AdamOptimizer().minimize(loss)
-        num_examples = X.shape[0]
+
         saver = tf.train.Saver()
 
         y_ = np.max(y, axis=1)
@@ -105,24 +126,28 @@ class ConvNet:
         X_train = X[train_indices]
         X_val = X[valid_indices]
         y_train = y[train_indices]
-        y_val = X[valid_indices]
+        y_val = y[valid_indices]
+
+        print 'Train size', X_train.shape[0], 'Validation size', X_val.shape[0]
 
         with tf.Session() as session:
             tf.initialize_all_variables().run()
 
             # train model
             for epoch in xrange(1, self.num_epochs+1):
+                start_time = time.time()
+                # Training
+                num_examples = X_train.shape[0]
                 losses = []
-                # run minibatches
                 for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
                     end = min(offset+self.batch_size, num_examples)
                     for celltype_idx in xrange(y.shape[1]):
-                        batch_sequence = np.reshape(X[offset:end, :],
+                        batch_sequence = np.reshape(X_train[offset:end, :],
                                                     (self.batch_size, self.height, self.width, self.num_channels))
-                        batch_labels = np.reshape(y[offset:end, celltype_idx], (self.batch_size, 1))
+                        batch_labels = np.reshape(y_train[offset:end, celltype_idx], (self.batch_size, 1))
                         feed_dict = {self.tf_sequence: batch_sequence,
                                      self.tf_train_labels: batch_labels,
-                                     self.dropout_rate: 0.5}
+                                     self.keep_prob: 0.5}
                         _, r_loss = session.run([optimizer, loss], feed_dict=feed_dict)
                         '''
                         run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
@@ -137,15 +162,38 @@ class ConvNet:
                             summary_writer.add_run_metadata(run_metadata, 'Epoch %d, offset %d' % (epoch, offset))
                         '''
                         losses.append(r_loss)
-                t_loss = np.sum(np.array(losses))
+                t_loss = np.mean(np.array(losses))
 
                 #loss_summary = tf.scalar_summary('Mean loss training', t_loss)
                 #summary_writer.add_summary(loss_summary)
 
-                if self.verbose:
-                    print epoch, t_loss
+                # Validation
+                accuracies = []
+                num_examples = X_val.shape[0]
+                debug = tf.where(tf.abs(tf.nn.sigmoid(self.logits) - self.tf_train_labels) < 0.5)
+                for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
+                    end = min(offset+self.batch_size, num_examples)
+                    for celltype_idx in xrange(y.shape[1]):
+                        batch_sequence = np.reshape(X_val[offset:end, :],
+                                                    (self.batch_size, self.height, self.width, self.num_channels))
+                        batch_labels = np.reshape(y_val[offset:end, celltype_idx], (self.batch_size, 1))
+                        feed_dict = {self.tf_sequence: batch_sequence,
+                                     self.tf_train_labels: batch_labels,
+                                     self.keep_prob: 1}
+                        debug, acc = session.run([debug, valid_acc], feed_dict=feed_dict)
+                        print debug[:20]
+                        raw_input()
+                        accuracies.append(acc)
+                t_acc = np.mean(np.array(accuracies))
 
-            saver.save(session, self.model_dir+'conv.ckpt')
+                if self.verbose:
+                    print "EPOCH %d\tLOSS %f\tACC %f%%\tTIME %ds" % (epoch, float(t_loss), round(t_acc, 2), int(time.time()-start_time))
+
+                early_score = self.early_stopping.update(t_acc)
+                if early_score == 2:
+                    saver.save(session, self.model_dir + 'conv.ckpt')
+                elif early_score == 0:
+                    break
             summary_writer.add_graph(session.graph)
 
     def predict(self, X):
@@ -164,17 +212,16 @@ class ConvNet:
                 offset_ = offset - (self.batch_size-(end-offset))
                 batch_sequence = np.reshape(X[offset_:end, :],
                                             (self.batch_size, self.height, self.width, self.num_channels))
+
                 feed_dict = {self.tf_sequence: batch_sequence,
-                             self.dropout_rate: 1}
+                             self.keep_prob: 1}
                 prediction = session.run([prediction_op], feed_dict=feed_dict)
-                print len(prediction[0]),
                 prediction = prediction[0][offset-offset_:]
-                print offset, offset_, end, len(prediction[0])
                 predictions.extend(prediction)
         predictions = np.array(predictions).flatten()
         return predictions
 
-    def get_output_for_layer(self, sequence):
+    def get_output_for_dense_layer(self, X):
         return
 
 

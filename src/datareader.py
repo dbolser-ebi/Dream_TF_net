@@ -5,6 +5,7 @@ import os
 from enum import Enum
 import math
 import random
+import warnings
 
 
 class CrossvalOptions(Enum):
@@ -69,16 +70,18 @@ class DataReader:
         self.sequence_length = 200
 
     def sequence_to_one_hot(self, sequence):
-        encoding = np.zeros((len(sequence), 4), dtype=np.float32)
-        # Process A
-        encoding[(sequence == 'A') | (sequence == 'a'), 0] = 1
-        # Process C
-        encoding[(sequence == 'C') | (sequence == 'c'), 1] = 1
-        # Process G
-        encoding[(sequence == 'G') | (sequence == 'g'), 2] = 1
-        # Process T
-        encoding[(sequence == 'T') | (sequence == 't'), 3] = 1
-        return encoding
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            encoding = np.zeros((len(sequence), 4), dtype=np.float32)
+            # Process A
+            encoding[(sequence == 'A') | (sequence == 'a'), 0] = 1
+            # Process C
+            encoding[(sequence == 'C') | (sequence == 'c'), 1] = 1
+            # Process G
+            encoding[(sequence == 'G') | (sequence == 'g'), 2] = 1
+            # Process T
+            encoding[(sequence == 'T') | (sequence == 't'), 3] = 1
+            return encoding
 
     def get_celltypes_for_tf(self, transcription_factor):
         '''
@@ -328,67 +331,76 @@ class DataReader:
                     yield (chromosome, start), features, labels
 
     def generate_cross_celltype(self, transcription_factor, celltypes, options=[]):
+        position_tree = set()  # keeps track of which lines (chr, start) to include
+
         if CrossvalOptions.filter_on_DNase_peaks in options:
-            chipseq_peaks = self.get_chipseq_peaks_tree_for_tf(transcription_factor)
-            dnase_peaks = self.get_DNAse_peaks(celltypes)
-            for (chromosome, start, stop) in dnase_peaks:
-                for i in range(start, stop - self.sequence_length, self.stride):
-                    features = self.hg19[chromosome][i:i+self.sequence_length]
-                    labels = np.zeros((1, len(celltypes)), dtype=np.float32)
-                    for c_idx, celltype in enumerate(celltypes):
-                        if TFPeakEntry(celltype, chromosome, i) in chipseq_peaks:
-                            labels[:, c_idx] = 1
-                    yield features, labels
+            with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+                fin.readline()
+                dnase_peaks = self.get_DNAse_peaks(celltypes)
+                ordering = self.get_chromosome_ordering()
+                d_idx = 0
+                bin_length = 200
+                chr_dnase, start_dnase, _ = dnase_peaks[d_idx]
+                for line_idx, line in enumerate(fin):
+                    tokens = line.split()
+                    chromosome = tokens[0]
+                    start = int(tokens[1])
+                    while ordering[chr_dnase] < ordering[chromosome] \
+                            and d_idx < len(dnase_peaks) - 1:
+                        d_idx += 1
+                        (chr_dnase, start_dnase, _) = dnase_peaks[d_idx]
+                    while chr_dnase == chromosome and start_dnase + bin_length < start \
+                            and d_idx < len(dnase_peaks) - 1:
+                        d_idx += 1
+
+                    (chr_dnase, start_dnase, _) = dnase_peaks[d_idx]
+
+                    if chr_dnase == chromosome \
+                            and (start <= start_dnase + bin_length
+                                 and start_dnase <= start + bin_length):
+                        position_tree.add(line_idx)
 
         elif CrossvalOptions.balance_peaks in options:
             with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
-                celltype_names = fin.readline().split()[3:]
-                idxs = []
-                for i, celltype in enumerate(celltype_names):
-                    if celltype in celltypes:
-                        idxs.append(i)
-                lines = fin.read().splitlines()
+                fin.readline()
                 bound_lines = []
                 unbound_lines = []
-                for line in lines:
-                    if 'B' in line:
-                        bound_lines.append(line)
+                # only the train set
+                for line_idx, line in enumerate(fin):
+                    if 'B' in line[:-2]:
+                        bound_lines.append(line_idx)
                     else:
-                        unbound_lines.append(line)
-                random.shuffle(bound_lines)
-                random.shuffle(unbound_lines)
-                out_lines = bound_lines
-                out_lines.extend(unbound_lines[:len(bound_lines)])
-                for position, line in enumerate(out_lines):
-                    tokens = line.split()
-                    bound_states = tokens[3:]
-                    start = int(tokens[1])
-                    chromosome = tokens[0]
-                    features = self.hg19[chromosome][start:start + self.sequence_length]
-                    labels = np.zeros((1, len(celltypes)), dtype=np.float32)
-                    for i, idx in enumerate(idxs):
-                        if bound_states[idx] == 'B':
-                            labels[:, i] = 1
-                    yield (chromosome, start), features, labels
+                        unbound_lines.append(line_idx)
 
-        else:
-            with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
-                celltype_names = fin.readline().split()[3:]
-                idxs = []
-                for i, celltype in enumerate(celltype_names):
-                    if celltype in celltypes:
-                        idxs.append(i)
-                for position, line in enumerate(fin):
+                print "num bound lines", len(bound_lines)
+                random.shuffle(unbound_lines)
+                bound_lines.extend(unbound_lines[:len(bound_lines)])
+                position_tree.update(set(bound_lines))
+
+        with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin, \
+                open('../data/preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.txt') as f_seqfeat:
+            celltype_names = fin.readline().split()[3:]
+            f_seqfeat.readline()
+            idxs = []
+            for i, celltype in enumerate(celltype_names):
+                if celltype in celltypes:
+                    idxs.append(i)
+            for lidx, line in enumerate(fin):
+                seqfeatline = f_seqfeat.readline()
+                if len(position_tree) == 0 or lidx in position_tree:
                     tokens = line.split()
                     bound_states = tokens[3:]
                     start = int(tokens[1])
                     chromosome = tokens[0]
-                    features = self.hg19[chromosome][start:start + self.sequence_length]
+                    sequence = self.hg19[chromosome][start:start + self.sequence_length]
+                    sequence_features = np.array(seqfeatline.split()[2:], dtype=np.float32)
+                    sequence_features[np.isnan(sequence_features)] = -100.0
                     labels = np.zeros((1, len(celltypes)), dtype=np.float32)
                     for i, idx in enumerate(idxs):
                         if bound_states[idx] == 'B':
                             labels[:, i] = 1
-                    yield (chromosome, start), features, labels
+                    yield (chromosome, start), sequence, labels
+
 
     def generate_multi_task(self, tf_mapping, options=None):
         if options == CrossvalOptions.filter_on_DNase_peaks:
@@ -415,9 +427,3 @@ class DataReader:
                                 labels[combination_to_idx[(tf, celltype)]] = 1
                     yield features, labels
 
-if __name__ == '__main__':
-    datareader = DataReader('../data/')
-    tf = 'CTCF'
-    celltypes = datareader.get_celltypes_for_tf(tf)
-    for idx, instance in enumerate(datareader.generate_cross_celltype(tf, celltypes, [CrossvalOptions.balance_peaks])):
-        print instance
