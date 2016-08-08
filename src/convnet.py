@@ -170,7 +170,6 @@ class ConvNet:
                 # Validation
                 accuracies = []
                 num_examples = X_val.shape[0]
-                debug = tf.where(tf.abs(tf.nn.sigmoid(self.logits) - self.tf_train_labels) < 0.5)
                 for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
                     end = min(offset+self.batch_size, num_examples)
                     for celltype_idx in xrange(y.shape[1]):
@@ -180,9 +179,7 @@ class ConvNet:
                         feed_dict = {self.tf_sequence: batch_sequence,
                                      self.tf_train_labels: batch_labels,
                                      self.keep_prob: 1}
-                        debug, acc = session.run([debug, valid_acc], feed_dict=feed_dict)
-                        print debug[:20]
-                        raw_input()
+                        acc = session.run([valid_acc], feed_dict=feed_dict)
                         accuracies.append(acc)
                 t_acc = np.mean(np.array(accuracies))
 

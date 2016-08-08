@@ -12,7 +12,7 @@ class Evaluator:
 
     def __init__(self, datapath):
         self.num_test_instances = 51676736
-        self.num_train_instances = 497961*2
+        self.num_train_instances = 433306*2
         self.num_tf = 33
         self.num_celltypes = 14
         self.num_train_celltypes = 11
@@ -88,25 +88,25 @@ class Evaluator:
             celltype_test = celltypes[-1]
 
             # convnet
-            X_train = np.zeros((self.num_train_instances, 200, 4), dtype=np.float16)
+            #X_train = np.zeros((self.num_train_instances, 200, 4), dtype=np.float16)
+            #y_train = np.zeros((self.num_train_instances, len(celltypes_train)), dtype=np.float16)
 
             # trees
-            #X_train = np.zeros((self.num_train_instances, 7), dtype=np.float32)
-
-            y_train = np.zeros((self.num_train_instances, len(celltypes_train)), dtype=np.float16)
+            X_train = np.zeros((self.num_train_instances, 7), dtype=np.float32)
+            y_train = np.zeros((self.num_train_instances,), dtype=np.float16)
 
             for idx, instance in enumerate(self.datareader.generate_cross_celltype(tf,
                                            celltypes_train,
                                            [CrossvalOptions.balance_peaks])):
                 if idx >= self.num_train_instances:
                     break
-                (chromosome, start), sequence, labels = instance
+                (chromosome, start), sequence, sequence_features, labels = instance
                 # convnet
-                X_train[idx, :, :] = self.datareader.sequence_to_one_hot(np.array(list(sequence)))
+                #X_train[idx, :, :] = self.datareader.sequence_to_one_hot(np.array(list(sequence)))
 
                 # tree
-                #X_train[idx, :] = np.array(tokens[2:], dtype=np.float32)
-                y_train[idx, :] = labels
+                X_train[idx, :] = sequence_features
+                y_train[idx] = np.max(labels.flatten()[:-1])
 
             model.fit(X_train, y_train)
 
@@ -124,8 +124,13 @@ class Evaluator:
                 print "TESTING ON CHROMOSOME", test_chromosome
                 self.num_test_instances = self.datareader.get_num_instances(test_chromosomes[0])
                 print 'num test instances', self.num_test_instances
-                y_test = np.zeros((self.num_test_instances, 1), dtype=np.float16)
-                X_test = np.zeros((self.num_test_instances, 200, 4), dtype=np.float16)
+                y_test = np.zeros((self.num_test_instances,), dtype=np.float16)
+                # convnet
+                #X_test = np.zeros((self.num_test_instances, 200, 4), dtype=np.float16)
+
+                # tree
+                X_test = np.zeros((self.num_test_instances, 7), dtype=np.float16)
+
                 dnase_peaks = self.datareader.get_DNAse_peaks([celltype_test])
                 d_idx = 0
                 (chr_dnase, start_dnase, _) = dnase_peaks[d_idx]
@@ -135,7 +140,7 @@ class Evaluator:
                                                                         [celltype_test]):
                     if idx >= self.num_test_instances:
                         break
-                    (chromosome, start), sequence, labels = instance
+                    (chromosome, start), sequence, sequence_features, labels = instance
                     if chromosome != test_chromosome:
                         continue
 
@@ -163,11 +168,12 @@ class Evaluator:
                         y_pred[idx, :] = 0
                     '''
                     y_test[idx, :] = labels
-                    X_test[idx, :, :] = self.datareader.sequence_to_one_hot(sequence)
 
+                    # convnet
+                    #X_test[idx, :, :] = self.datareader.sequence_to_one_hot(sequence)
+                    X_test[idx] = sequence_features
                     idx += 1
                 y_pred = model.predict(X_test)
-                print y_pred[:25]
 
                 self.print_results(y_test, y_pred)
 
@@ -179,8 +185,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--threshold', help='set tf motif threshold', required=False)
     args = parser.parse_args()
-    model = ConvNet('../log/', num_epochs=10, batch_size=512)
-    #model = RandomForestClassifier(n_estimators=10)
+    #model = ConvNet('../log/', num_epochs=10, batch_size=512)
+    model = RandomForestClassifier(n_estimators=10)
 
     evaluator = Evaluator('../data/')
     evaluator.run_cross_cell_benchmark(model)

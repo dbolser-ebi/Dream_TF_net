@@ -394,12 +394,11 @@ class DataReader:
                     chromosome = tokens[0]
                     sequence = self.hg19[chromosome][start:start + self.sequence_length]
                     sequence_features = np.array(seqfeatline.split()[2:], dtype=np.float32)
-                    sequence_features[np.isnan(sequence_features)] = -100.0
                     labels = np.zeros((1, len(celltypes)), dtype=np.float32)
                     for i, idx in enumerate(idxs):
                         if bound_states[idx] == 'B':
                             labels[:, i] = 1
-                    yield (chromosome, start), sequence, labels
+                    yield (chromosome, start), sequence, sequence_features, labels
 
 
     def generate_multi_task(self, tf_mapping, options=None):
