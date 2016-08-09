@@ -20,7 +20,7 @@ class Evaluator:
         self.datapath = datapath
         self.datareader = DataReader(datapath)
 
-    def print_results(self, y_test, y_pred):
+    def print_results(self, y_test, y_pred, test_name = '', outfile=''):
         TP = 0
         FP = 0
         TN = 0
@@ -34,14 +34,27 @@ class Evaluator:
                 FN += 1
             else:
                 TN += 1
-        print 'TP', TP, 'FP', FP, 'TN', TN, 'FN', FN
-        print 'AUC ROC', auroc(y_test.flatten(), y_pred.flatten())
-        print 'AUC PRC', auprc(y_test.flatten(), y_pred.flatten())
-        print 'RECALL AT FDR 0.9', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.90)
-        print 'RECALL AT FDR 0.5', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.50)
-        print 'RECALL AT FDR 0.25', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.25)
-        print 'RECALL AT FDR 0.1', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.10)
-        print 'RECALL AT FDR 0.05', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.05)
+        if outfile == '':
+            print 'TP', TP, 'FP', FP, 'TN', TN, 'FN', FN
+            print 'AUC ROC', auroc(y_test.flatten(), y_pred.flatten())
+            print 'AUC PRC', auprc(y_test.flatten(), y_pred.flatten())
+            print 'RECALL AT FDR 0.9', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.90)
+            print 'RECALL AT FDR 0.5', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.50)
+            print 'RECALL AT FDR 0.25', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.25)
+            print 'RECALL AT FDR 0.1', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.10)
+            print 'RECALL AT FDR 0.05', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.05)
+        else:
+            with open(outfile, 'w') as fout:
+                print>>fout, test_name
+                print>>fout, 'TP', TP, 'FP', FP, 'TN', TN, 'FN', FN
+                print>>fout, 'AUC ROC', auroc(y_test.flatten(), y_pred.flatten())
+                print>>fout, 'AUC PRC', auprc(y_test.flatten(), y_pred.flatten())
+                print>>fout, 'RECALL AT FDR 0.9', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.90)
+                print>>fout, 'RECALL AT FDR 0.5', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.50)
+                print>>fout, 'RECALL AT FDR 0.25', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.25)
+                print>>fout, 'RECALL AT FDR 0.1', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.10)
+                print>>fout, 'RECALL AT FDR 0.05', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.05)
+
 
     def make_predictions(self, transcription_factor):
         tf_leaderboard = {
@@ -227,12 +240,12 @@ class Evaluator:
                         y_test = np.zeros((self.num_test_instances,), dtype=np.int32)
                     idx = 0
 
-                elif curr_chr != chromosome:
+                elif curr_chr != '-1' and curr_chr != chromosome:
                     print 'Results for test', curr_chr
                     print 'num test instances', self.num_test_instances
                     y_pred = model.predict(X_test)
                     self.print_results(y_test, y_pred)
-                    
+
                 if curr_chr == chromosome:
                     y_test[idx] = label
 
@@ -273,8 +286,8 @@ class Evaluator:
 
 if __name__ == '__main__':
     #model = ConvNet('../log/', num_epochs=1, batch_size=512)
-    #model = RandomForestClassifier(n_estimators=10)
-    model = DNNClassifier(200, 4, 0.2, [100], [0.5], verbose=True, max_epochs=1, batch_size=512)
+    model = RandomForestClassifier(n_estimators=10)
+    #model = DNNClassifier(200, 4, 0.2, [100], [0.5], verbose=True, max_epochs=1, batch_size=512)
 
     evaluator = Evaluator('../data/')
     evaluator.run_cross_cell_benchmark(model)

@@ -398,12 +398,12 @@ class DataReader:
         with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin, \
                 open('../data/preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.txt') as f_seqfeat:
             celltype_names = fin.readline().split()[3:]
-            sequence_features = [] #TODO
             idxs = []
             for i, celltype in enumerate(celltype_names):
                 if celltype in celltypes:
                     idxs.append(i)
             for lidx, line in enumerate(fin):
+                sequence_features = np.array(map(float, f_seqfeat.readline().split()), dtype=np.float32)
                 if len(position_tree) == 0 or lidx in position_tree:
                     tokens = line.split()
                     bound_states = tokens[3:]

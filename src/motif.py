@@ -114,7 +114,7 @@ class MotifProcessor:
     def featurize_sequence(self, transcription_factor):
         pssms = map(lambda x: x.counts.normalize(pseudocounts=0.5).log_odds(), self.get_motifs(transcription_factor))
         celltypes = self.datareader.get_celltypes_for_tf(transcription_factor)
-        with open('../data/preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.txt', 'w') as fout:
+        with gzip.open('../data/preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.gz', 'w') as fout:
             for idx, instance in enumerate(self.datareader.generate_cross_celltype(transcription_factor,
                                                                               celltypes)):
                 (_, _), sequence, _, _ = instance
@@ -126,7 +126,8 @@ class MotifProcessor:
                                    dtype=np.float32)
                     arr[np.isnan(arr)] = -50000.0
                     for e in np.nditer(arr):
-                        print>> fout, e
+                        print>> fout, e,
+                print>>fout
 
 
 if __name__ == '__main__':
