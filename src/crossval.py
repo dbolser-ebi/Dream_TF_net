@@ -245,6 +245,7 @@ class Evaluator:
                     print 'num test instances', self.num_test_instances
                     y_pred = model.predict(X_test)
                     self.print_results(y_test, y_pred)
+                    curr_chr = '-1'
 
                 if curr_chr == chromosome:
                     y_test[idx] = label

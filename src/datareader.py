@@ -116,7 +116,7 @@ class DataReader:
         return celltypes
 
     def get_num_sequence_features(self, transcription_factor):
-        with open(os.path.join(self.datapath, 'preprocess/SEQUENCE_FEATURES/'+transcription_factor+'.txt')) as fin:
+        with gzip.open(os.path.join(self.datapath, 'preprocess/SEQUENCE_FEATURES/'+transcription_factor+'.gz')) as fin:
             return len(fin.readline().split())
 
     def get_tfs_for_celltype(self, datapath, celltype):
@@ -396,7 +396,7 @@ class DataReader:
                 position_tree.update(set(bound_lines))
 
         with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin, \
-                open('../data/preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.txt') as f_seqfeat:
+                gzip.open('../data/preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.gz') as f_seqfeat:
             celltype_names = fin.readline().split()[3:]
             idxs = []
             for i, celltype in enumerate(celltype_names):
