@@ -43,7 +43,51 @@ class Evaluator:
         print 'RECALL AT FDR 0.05', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.05)
 
     def make_predictions(self, transcription_factor):
-        return
+        tf_leaderboard = {
+            'ARID3A': ['K562'],
+            'ATF2': ['K562'],
+            'ATF3': ['liver'],
+            'ATF7': ['MCF-7'],
+            'CEBPB': ['MCF-7'],
+            'CREB1': ['MCF-7'],
+            'CTCF': ['GM12878'],
+            'E2F6': ['K562'],
+            'EGR1': ['K562'],
+            'EP300': ['MCF-7'],
+            'FOXA1': ['MCF-7'],
+            'GABPA': ['K562'],
+            'GATA3': ['MCF-7'],
+            'JUND': ['H1-hESC'],
+            'MAFK': ['K562', 'MCF-7'],
+            'MAX': ['MCF-7'],
+            'MYC': ['HepG2'],
+            'REST': ['K562'],
+            'RFX5': ['HepG2'],
+            'SPI1': ['K562'],
+            'SRF': ['MCF-7'],
+            'STAT3': ['GM12878'],
+            'TAF1': ['HepG2'],
+            'TCF12': ['K562'],
+            'TCF7L2': ['MCF-7'],
+            'TEAD4': ['MCF-7'],
+            'YY1': ['K562'],
+            'ZNF143': ['k562']
+        }
+        tf_final = {
+            'ATF2': ['HEPG2'],
+            'CTCF': ['PC-3', 'induced_pluripotent_stem_cell'],
+            'E2F1': ['K562'],
+            'EGR1': ['liver'],
+            'FOXA1': ['liver'],
+            'FOXA2': ['liver'],
+            'GABPA': ['liver'],
+            'HNF4A': ['liver'],
+            'JUND': ['liver'],
+            'MAX': ['liver'],
+            'NANOG': ['induced_pluripotent_stem_cell'],
+            'REST': ['liver'],
+            'TAF1': ['liver']
+        }
 
     def run_within_cell_benchmark(self, model):
         start_benchmark_time = time.time()
@@ -88,12 +132,12 @@ class Evaluator:
             celltype_test = celltypes[-1]
 
             # convnet
-            #X_train = np.zeros((self.num_train_instances, 200, 4), dtype=np.float16)
-            #y_train = np.zeros((self.num_train_instances, len(celltypes_train)), dtype=np.float16)
+            X_train = np.zeros((self.num_train_instances, 200, 4), dtype=np.float16)
+            y_train = np.zeros((self.num_train_instances, len(celltypes_train)), dtype=np.float16)
 
             # trees
-            X_train = np.zeros((self.num_train_instances, 7), dtype=np.float32)
-            y_train = np.zeros((self.num_train_instances,), dtype=np.float16)
+            #X_train = np.zeros((self.num_train_instances, 7), dtype=np.float32)
+            #y_train = np.zeros((self.num_train_instances,), dtype=np.float16)
 
             for idx, instance in enumerate(self.datareader.generate_cross_celltype(tf,
                                            celltypes_train,
@@ -102,11 +146,12 @@ class Evaluator:
                     break
                 (chromosome, start), sequence, sequence_features, labels = instance
                 # convnet
-                #X_train[idx, :, :] = self.datareader.sequence_to_one_hot(np.array(list(sequence)))
+                X_train[idx, :, :] = self.datareader.sequence_to_one_hot(np.array(list(sequence)))
+                y_train[idx, :] = labels
 
                 # tree
-                X_train[idx, :] = sequence_features
-                y_train[idx] = np.max(labels.flatten()[:-1])
+                #X_train[idx, :] = sequence_features
+                #y_train[idx] = np.max(labels.flatten()[:-1])
 
             model.fit(X_train, y_train)
 
@@ -120,62 +165,75 @@ class Evaluator:
             # --------------- TEST
             print "Running tests"
             test_chromosomes = ['chr20', 'chr22']
-            for test_chromosome in test_chromosomes:
-                print "TESTING ON CHROMOSOME", test_chromosome
-                self.num_test_instances = self.datareader.get_num_instances(test_chromosomes[0])
-                print 'num test instances', self.num_test_instances
-                y_test = np.zeros((self.num_test_instances,), dtype=np.float16)
-                # convnet
-                #X_test = np.zeros((self.num_test_instances, 200, 4), dtype=np.float16)
 
-                # tree
-                X_test = np.zeros((self.num_test_instances, 7), dtype=np.float16)
+            curr_chr = '-1'
 
-                dnase_peaks = self.datareader.get_DNAse_peaks([celltype_test])
-                d_idx = 0
-                (chr_dnase, start_dnase, _) = dnase_peaks[d_idx]
-                idx = 0
+            # tree
+            #X_test = np.zeros((self.num_test_instances, 7), dtype=np.float16)
+            #y_test = np.zeros((self.num_test_instances,), dtype=np.float16)
 
-                for instance in self.datareader.generate_cross_celltype(tf,
-                                                                        [celltype_test]):
-                    if idx >= self.num_test_instances:
-                        break
-                    (chromosome, start), sequence, sequence_features, labels = instance
-                    if chromosome != test_chromosome:
-                        continue
+            dnase_peaks = self.datareader.get_DNAse_peaks([celltype_test])
+            d_idx = 0
+            (chr_dnase, start_dnase, _) = dnase_peaks[d_idx]
+            idx = 0
 
-                    '''
-                    # compute if dnase window needs to move
-                    while chromosome_ordering[chr_dnase] < chromosome_ordering[chromosome]\
-                            and d_idx < len(dnase_peaks)-1:
-                        d_idx += 1
-                        (chr_dnase, start_dnase, _) = dnase_peaks[d_idx]
-                    while chr_dnase == chromosome and start_dnase + bin_length < start \
-                            and d_idx < len(dnase_peaks)-1:
-                        d_idx += 1
+            y_test = None
+            X_test = None
 
-                        (chr_dnase, start_dnase, _) = dnase_peaks[d_idx]
+            for instance in self.datareader.generate_cross_celltype(tf,
+                                                                    [celltype_test]):
+                (chromosome, start), sequence, sequence_features, labels = instance
+                if curr_chr == '-1' and chromosome in test_chromosomes:
+                    curr_chr = chromosome
+                    self.num_test_instances = self.datareader.get_num_instances(chromosome)
+                    # convnet
+                    X_test = np.zeros((self.num_test_instances, 200, 4), dtype=np.float16)
+                    y_test = np.zeros((self.num_test_instances, 1), dtype=np.float16)
+                    idx = 0
 
-                    accessible = chr_dnase == chromosome and (start <= start_dnase+bin_length and start_dnase <= start+bin_length)
+                elif curr_chr != chromosome and chromosome in test_chromosomes:
+                    print 'Results for test', chromosome
+                    print 'num test instances', self.num_test_instances
+                    y_pred = model.predict(X_test)
+                    self.print_results(y_test, y_pred)
 
-                    if accessible:
-                        X_pred = np.zeros((1, 200, 4), dtype=np.float16)
-                        X_pred[0, :, :] = self.datareader.sequence_to_one_hot(features)
-                        prediction = model.predict(X_pred)
-                        print prediction
-                        y_pred[idx, :] = prediction
-                    else:
-                        y_pred[idx, :] = 0
-                    '''
+                    curr_chr = chromosome
+                    self.num_test_instances = self.datareader.get_num_instances(chromosome)
+                    # convnet
+                    X_test = np.zeros((self.num_test_instances, 200, 4), dtype=np.float16)
+                    y_test = np.zeros((self.num_test_instances, 1), dtype=np.float16)
+                    idx = 0
+
+                if curr_chr == chromosome:
                     y_test[idx, :] = labels
 
                     # convnet
-                    #X_test[idx, :, :] = self.datareader.sequence_to_one_hot(sequence)
-                    X_test[idx] = sequence_features
+                    X_test[idx, :, :] = self.datareader.sequence_to_one_hot(sequence)
+                    # X_test[idx] = sequence_features
                     idx += 1
-                y_pred = model.predict(X_test)
+                '''
+                # compute if dnase window needs to move
+                while chromosome_ordering[chr_dnase] < chromosome_ordering[chromosome]\
+                        and d_idx < len(dnase_peaks)-1:
+                    d_idx += 1
+                    (chr_dnase, start_dnase, _) = dnase_peaks[d_idx]
+                while chr_dnase == chromosome and start_dnase + bin_length < start \
+                        and d_idx < len(dnase_peaks)-1:
+                    d_idx += 1
 
-                self.print_results(y_test, y_pred)
+                    (chr_dnase, start_dnase, _) = dnase_peaks[d_idx]
+
+                accessible = chr_dnase == chromosome and (start <= start_dnase+bin_length and start_dnase <= start+bin_length)
+
+                if accessible:
+                    X_pred = np.zeros((1, 200, 4), dtype=np.float16)
+                    X_pred[0, :, :] = self.datareader.sequence_to_one_hot(features)
+                    prediction = model.predict(X_pred)
+                    print prediction
+                    y_pred[idx, :] = prediction
+                else:
+                    y_pred[idx, :] = 0
+                '''
 
     def run_multi_benchmark(self, model):
         return
@@ -185,8 +243,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--threshold', help='set tf motif threshold', required=False)
     args = parser.parse_args()
-    #model = ConvNet('../log/', num_epochs=10, batch_size=512)
-    model = RandomForestClassifier(n_estimators=10)
+
+    model = ConvNet('../log/', num_epochs=1, batch_size=512)
+    #model = RandomForestClassifier(n_estimators=10)
 
     evaluator = Evaluator('../data/')
     evaluator.run_cross_cell_benchmark(model)

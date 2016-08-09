@@ -115,20 +115,19 @@ class MotifProcessor:
         pssms = map(lambda x: x.counts.normalize(pseudocounts=0.5).log_odds(), self.get_motifs(transcription_factor))
         celltypes = self.datareader.get_celltypes_for_tf(transcription_factor)
         with open('../data/preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.txt', 'w') as fout:
-            print >>fout, 'max', '90', '80', '70', 'median', 'mean', 'tot'
             for idx, instance in enumerate(self.datareader.generate_cross_celltype(transcription_factor,
                                                                               celltypes)):
-                (chromosome, start), sequence, labels = instance
-                scores = pssms[0].calculate(Seq(sequence, pssms[0].alphabet))
-                for i in xrange(1, len(pssms)):
-                    score = pssms[i].calculate(Seq(sequence, pssms[0].alphabet))
-                    np.hstack((scores, score))
-
-                arr = np.array([np.max(scores), np.percentile(scores, 90), np.percentile(scores, 80),
-                    np.percentile(scores, 70), np.percentile(scores, 50), np.mean(scores), np.sum(scores)],
-                               dtype=np.float32)
-                arr[np.isnan(arr)] = -100.0
-                print>> fout, " ".join(map(str, arr.tolist()))
+                (_, _), sequence, _, _ = instance
+                scores = []
+                for i in xrange(len(pssms)):
+                    score = pssms[i].calculate(Seq(sequence, pssms[i].alphabet))
+                    arr = np.array([np.max(score), np.percentile(score, 90), np.percentile(score, 80),
+                                    np.percentile(score, 70), np.percentile(score, 50), np.mean(score),
+                                    np.sum(score)],
+                                   dtype=np.float32)
+                    arr[np.isnan(arr)] = -50000.0
+                    scores.extend(arr.tolist())
+                print>> fout, " ".join(map(str, scores))
 
 
 if __name__ == '__main__':

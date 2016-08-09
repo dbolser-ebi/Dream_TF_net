@@ -380,26 +380,23 @@ class DataReader:
         with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin, \
                 open('../data/preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.txt') as f_seqfeat:
             celltype_names = fin.readline().split()[3:]
-            f_seqfeat.readline()
+            sequence_features = [] #TODO
             idxs = []
             for i, celltype in enumerate(celltype_names):
                 if celltype in celltypes:
                     idxs.append(i)
             for lidx, line in enumerate(fin):
-                seqfeatline = f_seqfeat.readline()
                 if len(position_tree) == 0 or lidx in position_tree:
                     tokens = line.split()
                     bound_states = tokens[3:]
                     start = int(tokens[1])
                     chromosome = tokens[0]
                     sequence = self.hg19[chromosome][start:start + self.sequence_length]
-                    sequence_features = np.array(seqfeatline.split()[2:], dtype=np.float32)
                     labels = np.zeros((1, len(celltypes)), dtype=np.float32)
                     for i, idx in enumerate(idxs):
                         if bound_states[idx] == 'B':
                             labels[:, i] = 1
                     yield (chromosome, start), sequence, sequence_features, labels
-
 
     def generate_multi_task(self, tf_mapping, options=None):
         if options == CrossvalOptions.filter_on_DNase_peaks:

@@ -28,11 +28,6 @@ def calc_loss(logits, labels):
     return tf.reduce_mean(entropies)
 
 
-def calc_val_acc(logits, labels):
-    predictions = tf.nn.sigmoid(logits)
-    return tf.reduce_mean(tf.where(tf.abs(predictions-labels) < 0.5))
-
-
 class EarlyStopping:
     def __init__(self, max_stalls):
         self.best_acc = 0
@@ -115,7 +110,6 @@ class ConvNet:
         summary_writer = tf.train.SummaryWriter(self.model_dir + 'train')
 
         loss = calc_loss(self.logits, self.tf_train_labels)
-        valid_acc = calc_val_acc(self.logits, self.tf_train_labels)
         optimizer = tf.train.AdamOptimizer().minimize(loss)
 
         saver = tf.train.Saver()
@@ -170,6 +164,7 @@ class ConvNet:
                 # Validation
                 accuracies = []
                 num_examples = X_val.shape[0]
+                prediction_op = tf.nn.sigmoid(self.logits)
                 for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
                     end = min(offset+self.batch_size, num_examples)
                     for celltype_idx in xrange(y.shape[1]):
@@ -179,12 +174,12 @@ class ConvNet:
                         feed_dict = {self.tf_sequence: batch_sequence,
                                      self.tf_train_labels: batch_labels,
                                      self.keep_prob: 1}
-                        acc = session.run([valid_acc], feed_dict=feed_dict)
-                        accuracies.append(acc)
+                        prediction = session.run([prediction_op], feed_dict=feed_dict)
+                        accuracies.append(100.0*np.sum(np.abs(prediction-batch_labels) < 0.5)/batch_labels.size)
                 t_acc = np.mean(np.array(accuracies))
 
                 if self.verbose:
-                    print "EPOCH %d\tLOSS %f\tACC %f%%\tTIME %ds" % (epoch, float(t_loss), round(t_acc, 2), int(time.time()-start_time))
+                    print "EPOCH %d\t\tLOSS %f\t\tACC %.2f%%\t\tTIME %ds" % (epoch, float(t_loss), t_acc, int(time.time()-start_time))
 
                 early_score = self.early_stopping.update(t_acc)
                 if early_score == 2:
