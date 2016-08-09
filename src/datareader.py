@@ -83,6 +83,20 @@ class DataReader:
             encoding[(sequence == 'T') | (sequence == 't'), 3] = 1
             return encoding
 
+    def sequence_to_one_hot_transpose(self, sequence):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            encoding = np.zeros((4, len(sequence)), dtype=np.float32)
+            # Process A
+            encoding[0, (sequence == 'A') | (sequence == 'a')] = 1
+            # Process C
+            encoding[1, (sequence == 'C') | (sequence == 'c')] = 1
+            # Process G
+            encoding[2, (sequence == 'G') | (sequence == 'g')] = 1
+            # Process T
+            encoding[3, (sequence == 'T') | (sequence == 't')] = 1
+            return encoding
+
     def get_celltypes_for_tf(self, transcription_factor):
         '''
         Returns the list of celltypes for that particular transcription factor
@@ -100,6 +114,10 @@ class DataReader:
                     celltypes = header_tokens[3:]
                 break
         return celltypes
+
+    def get_num_sequence_features(self, transcription_factor):
+        with open(os.path.join(self.datapath, 'preprocess/SEQUENCE_FEATURES/'+transcription_factor+'.txt')) as fin:
+            return len(fin.readline().split())
 
     def get_tfs_for_celltype(self, datapath, celltype):
         '''

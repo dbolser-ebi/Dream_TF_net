@@ -6,6 +6,7 @@ import argparse
 import time
 from wiggleReader import get_wiggle_output, wiggleToBedGraph, split_iter
 from sklearn.ensemble import RandomForestClassifier
+from theanonet import *
 
 
 class Evaluator:
@@ -118,12 +119,14 @@ class Evaluator:
         bin_length = 200
         chromosome_ordering = self.datareader.get_chromosome_ordering()
 
+
         print "Running cross celltype benchmark"
         for tf in ['CTCF']:
 
             #--------------- TRAIN
 
             print tf
+            num_sequence_features = self.datareader.get_num_sequence_features(tf)
             celltypes = self.datareader.get_celltypes_for_tf(tf)
             if len(celltypes) <= 1:
                 continue
@@ -131,32 +134,43 @@ class Evaluator:
             celltypes_train = celltypes[:-1]
             celltype_test = celltypes[-1]
 
-            # convnet
-            X_train = np.zeros((self.num_train_instances, 200, 4), dtype=np.float16)
-            y_train = np.zeros((self.num_train_instances, len(celltypes_train)), dtype=np.float16)
+            y_train_val = np.zeros((self.num_train_instances,), dtype=np.int32)
 
-            # trees
-            #X_train = np.zeros((self.num_train_instances, 7), dtype=np.float32)
-            #y_train = np.zeros((self.num_train_instances,), dtype=np.float16)
+            if isinstance(model, ConvNet):
+                X_train = np.zeros((self.num_train_instances, 200, 4), dtype=np.float16)
+                y_train = np.zeros((self.num_train_instances, len(celltypes_train)), dtype=np.float16)
+            elif isinstance(model, DNNClassifier):
+                X_train = np.zeros((self.num_train_instances, 4, 200), dtype=np.float32)
+                y_train = np.zeros((self.num_train_instances,), dtype=np.int32)
+            else:
+                X_train = np.zeros((self.num_train_instances, num_sequence_features), dtype=np.float32)
+                y_train = np.zeros((self.num_train_instances,), dtype=np.int32)
 
             for idx, instance in enumerate(self.datareader.generate_cross_celltype(tf,
-                                           celltypes_train,
+                                           celltypes,
                                            [CrossvalOptions.balance_peaks])):
                 if idx >= self.num_train_instances:
                     break
                 (chromosome, start), sequence, sequence_features, labels = instance
-                # convnet
-                X_train[idx, :, :] = self.datareader.sequence_to_one_hot(np.array(list(sequence)))
-                y_train[idx, :] = labels
 
-                # tree
-                #X_train[idx, :] = sequence_features
-                #y_train[idx] = np.max(labels.flatten()[:-1])
+                if isinstance(model, ConvNet):
+                    X_train[idx, :, :] = self.datareader.sequence_to_one_hot(np.array(list(sequence)))
+                    y_train[idx, :] = labels[:-1]
+                elif isinstance(model, DNNClassifier):
+                    X_train[idx, :, :] = self.datareader.sequence_to_one_hot_transpose(np.array(list(sequence)))
+                    y_train[idx] = np.max(labels.flatten()[:-1])
+                else:
+                    X_train[idx, :] = sequence_features
+                    y_train[idx] = np.max(labels.flatten()[:-1])
+
+                y_train_val[idx] = labels.flatten()[-1]
 
             model.fit(X_train, y_train)
 
+            predictions = model.predict(X_train)
+
             print 'TRAINING COMPLETED'
-            self.print_results(y_train[:, -1], model.predict(X_train))
+            self.print_results(y_train_val, predictions)
 
             # free up memory
             del X_train
@@ -165,51 +179,69 @@ class Evaluator:
             # --------------- TEST
             print "Running tests"
             test_chromosomes = ['chr20', 'chr22']
-
             curr_chr = '-1'
 
-            # tree
-            #X_test = np.zeros((self.num_test_instances, 7), dtype=np.float16)
-            #y_test = np.zeros((self.num_test_instances,), dtype=np.float16)
-
+            '''
             dnase_peaks = self.datareader.get_DNAse_peaks([celltype_test])
             d_idx = 0
             (chr_dnase, start_dnase, _) = dnase_peaks[d_idx]
-            idx = 0
+            '''
 
             y_test = None
             X_test = None
+            idx = 0
 
             for instance in self.datareader.generate_cross_celltype(tf,
                                                                     [celltype_test]):
-                (chromosome, start), sequence, sequence_features, labels = instance
+                (chromosome, start), sequence, sequence_features, label = instance
                 if curr_chr == '-1' and chromosome in test_chromosomes:
                     curr_chr = chromosome
                     self.num_test_instances = self.datareader.get_num_instances(chromosome)
-                    # convnet
-                    X_test = np.zeros((self.num_test_instances, 200, 4), dtype=np.float16)
-                    y_test = np.zeros((self.num_test_instances, 1), dtype=np.float16)
+                    if isinstance(model, ConvNet):
+                        X_test = np.zeros((self.num_test_instances, 200, 4), dtype=np.float16)
+                        y_test = np.zeros((self.num_test_instances, 1), dtype=np.float16)
+                    elif isinstance(model, DNNClassifier):
+                        X_test = np.zeros((self.num_test_instances, 4, 200), dtype=np.float32)
+                        y_test = np.zeros((self.num_test_instances,), dtype=np.int32)
+                    else:
+                        X_test = np.zeros((self.num_test_instances, num_sequence_features), dtype=np.float16)
+                        y_test = np.zeros((self.num_test_instances,), dtype=np.float16)
                     idx = 0
 
                 elif curr_chr != chromosome and chromosome in test_chromosomes:
-                    print 'Results for test', chromosome
+                    print 'Results for test', curr_chr
                     print 'num test instances', self.num_test_instances
                     y_pred = model.predict(X_test)
                     self.print_results(y_test, y_pred)
 
                     curr_chr = chromosome
                     self.num_test_instances = self.datareader.get_num_instances(chromosome)
-                    # convnet
-                    X_test = np.zeros((self.num_test_instances, 200, 4), dtype=np.float16)
-                    y_test = np.zeros((self.num_test_instances, 1), dtype=np.float16)
+                    if isinstance(model, ConvNet):
+                        X_test = np.zeros((self.num_test_instances, 200, 4), dtype=np.float16)
+                        y_test = np.zeros((self.num_test_instances, 1), dtype=np.float16)
+                    elif isinstance(model, DNNClassifier):
+                        X_test = np.zeros((self.num_test_instances, 4, 200), dtype=np.float32)
+                        y_test = np.zeros((self.num_test_instances,), dtype=np.int32)
+                    else:
+                        X_test = np.zeros((self.num_test_instances, num_sequence_features), dtype=np.float16)
+                        y_test = np.zeros((self.num_test_instances,), dtype=np.int32)
                     idx = 0
 
+                elif curr_chr != chromosome:
+                    print 'Results for test', curr_chr
+                    print 'num test instances', self.num_test_instances
+                    y_pred = model.predict(X_test)
+                    self.print_results(y_test, y_pred)
+                    
                 if curr_chr == chromosome:
-                    y_test[idx, :] = labels
+                    y_test[idx] = label
 
-                    # convnet
-                    X_test[idx, :, :] = self.datareader.sequence_to_one_hot(sequence)
-                    # X_test[idx] = sequence_features
+                    if isinstance(model, ConvNet):
+                        X_test[idx, :, :] = self.datareader.sequence_to_one_hot(sequence)
+                    elif isinstance(model, DNNClassifier):
+                        X_test[idx, :, :] = self.datareader.sequence_to_one_hot_transpose(sequence)
+                    else:
+                        X_test[idx, :] = sequence_features
                     idx += 1
                 '''
                 # compute if dnase window needs to move
@@ -240,12 +272,9 @@ class Evaluator:
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--threshold', help='set tf motif threshold', required=False)
-    args = parser.parse_args()
-
-    model = ConvNet('../log/', num_epochs=1, batch_size=512)
+    #model = ConvNet('../log/', num_epochs=1, batch_size=512)
     #model = RandomForestClassifier(n_estimators=10)
+    model = DNNClassifier(200, 4, 0.2, [100], [0.5], verbose=True, max_epochs=1, batch_size=512)
 
     evaluator = Evaluator('../data/')
     evaluator.run_cross_cell_benchmark(model)

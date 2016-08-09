@@ -118,7 +118,6 @@ class MotifProcessor:
             for idx, instance in enumerate(self.datareader.generate_cross_celltype(transcription_factor,
                                                                               celltypes)):
                 (_, _), sequence, _, _ = instance
-                scores = []
                 for i in xrange(len(pssms)):
                     score = pssms[i].calculate(Seq(sequence, pssms[i].alphabet))
                     arr = np.array([np.max(score), np.percentile(score, 90), np.percentile(score, 80),
@@ -126,8 +125,8 @@ class MotifProcessor:
                                     np.sum(score)],
                                    dtype=np.float32)
                     arr[np.isnan(arr)] = -50000.0
-                    scores.extend(arr.tolist())
-                print>> fout, " ".join(map(str, scores))
+                    for e in np.nditer(arr):
+                        print>> fout, e
 
 
 if __name__ == '__main__':
