@@ -204,14 +204,10 @@ class ConvNet:
                     if self.verbose:
                         print (bcolors.OKCYAN+"%d\t%f\t%f\t%.2f%%\t\t%ds"+bcolors.ENDC) % \
                               (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
-                        #print bcolors.OKGREEN+"EPOCH %d\t\tTRAIN LOSS %f\t\tVALID LOSS %f\t\tACC %.2f%%\t\tTIME %ds"+bcolors.ENDC \
-                        #      % (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
                 elif early_score == 1:
                     if self.verbose:
                         print "%d\t%f\t%f\t%.2f%%\t\t%ds" % \
                               (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
-                        #print "EPOCH %d\t\tTRAIN LOSS %f\t\tVALID LOSS %f\t\tACC %.2f%%\t\tTIME %ds" \
-                        #      % (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
                 elif early_score == 0:
                     if self.verbose:
                         print "Early stopping triggered, exiting..."

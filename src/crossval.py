@@ -1,6 +1,8 @@
 from datareader import *
 from performance_metrics import *
 import argparse
+from convnet import *
+from sklearn.ensemble import RandomForestClassifier
 
 
 class Evaluator:
@@ -299,14 +301,12 @@ if __name__ == '__main__':
     model = None
 
     if args.model == 'TFC':
-        from convnet import *
-        model = ConvNet('../log/', num_epochs=10, batch_size=512)
+        model = ConvNet('../log/', num_epochs=300, batch_size=512)
     elif args.model == 'RF':
-        from sklearn.ensemble import RandomForestClassifier
         model = RandomForestClassifier(n_estimators=333, max_features="sqrt")
     elif args.model == 'THC':
         from theanonet import *
-        model = DNNClassifier(200, 4, 0.2, [100], [0.1, 0.5], verbose=True, max_epochs=100, batch_size=64)
+        model = DNNClassifier(200, 4, 0.2, [100], [0.5], verbose=True, max_epochs=10, batch_size=512)
 
     else:
         print "Model options: TFC (TensorFlow Convnet), THC (Theano Convnet), RF (Random Forest)"

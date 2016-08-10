@@ -90,7 +90,7 @@ class DNNClassifier:
         lasagne.layers.noise._srng = lasagne.layers.noise.RandomStreams(seed)
 
         layer = InputLayer(shape=(None, num_channels, length), name='Input')
-        layer = DropoutLayer(layer, p=dropout_layers[0], name='Dropout_input')
+        #layer = DropoutLayer(layer, p=dropout_layers[0], name='Dropout_input')
 
         layer = Conv1DLayer(layer, 15, 15, name='Convolution_1')
         layer = MaxPool1DLayer(layer, 35, 1, name='MAXPool_1')
@@ -102,12 +102,12 @@ class DNNClassifier:
 
         clf = NeuralNet(layers=layer,
                         regression=False,
-                        update=nesterov_momentum,
+                        update=adam,#nesterov_momentum,
                         update_learning_rate=theano.shared(float32(learning_rate)),
-                        update_momentum=theano.shared(float32(momentum)),
+                        #update_momentum=theano.shared(float32(momentum)),
                         on_epoch_finished=[
-                            AdjustVariable('update_learning_rate', start=learning_rate, stop=0.0001),
-                            AdjustVariable('update_momentum', start=momentum, stop=0.999),
+                            #AdjustVariable('update_learning_rate', start=learning_rate, stop=0.0001),
+                            #AdjustVariable('update_momentum', start=momentum, stop=0.999),
                             EarlyStopping(patience=patience, verbose=verbose),
                         ],
                         verbose=1 if verbose else 0,
