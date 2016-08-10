@@ -9,6 +9,7 @@ class bcolors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
     OKGREEN = '\033[92m'
+    OKCYAN = '\033[36m'
     WARNING = '\033[93m'
     FAIL = '\033[91m'
     ENDC = '\033[0m'
@@ -42,7 +43,7 @@ def calc_loss(logits, labels):
 
 class EarlyStopping:
     def __init__(self, max_stalls):
-        self.best_loss = 0
+        self.best_loss = 100
         self.num_stalls = 0
         self.max_stalls = max_stalls
 
@@ -140,7 +141,8 @@ class ConvNet:
             tf.initialize_all_variables().run()
 
             if self.verbose:
-                print "EPOCH\tTRAIN LOSS\tVALID LOSS\tVALID ACC\tTIME"
+                print
+                print "EPOCH\tTRAIN LOSS\tVALID LOSS\tVALID ACCURACY\tTIME"
 
             # train model
             for epoch in xrange(1, self.num_epochs+1):
@@ -200,13 +202,13 @@ class ConvNet:
                 if early_score == 2:
                     saver.save(session, self.model_dir + 'conv.ckpt')
                     if self.verbose:
-                        print bcolors.OKBLUE+"%d\t%f\t%f\t%.2f%%\t%ds"+bcolors.ENDC % \
+                        print (bcolors.OKCYAN+"%d\t%f\t%f\t%.2f%%\t\t%ds"+bcolors.ENDC) % \
                               (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
                         #print bcolors.OKGREEN+"EPOCH %d\t\tTRAIN LOSS %f\t\tVALID LOSS %f\t\tACC %.2f%%\t\tTIME %ds"+bcolors.ENDC \
                         #      % (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
-                elif early_score:
+                elif early_score == 1:
                     if self.verbose:
-                        print "%d\t%f\t%f\t%.2f%%\t%ds" % \
+                        print "%d\t%f\t%f\t%.2f%%\t\t%ds" % \
                               (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
                         #print "EPOCH %d\t\tTRAIN LOSS %f\t\tVALID LOSS %f\t\tACC %.2f%%\t\tTIME %ds" \
                         #      % (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
