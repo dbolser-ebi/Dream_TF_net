@@ -201,7 +201,8 @@ class Evaluator:
             del y_train
 
             # --------------- TEST
-            print "Running tests"
+            print
+            print "RUNNING TESTS"
             test_chromosomes = ['chr10', 'chr20', 'chr22']
             curr_chr = '-1'
 
@@ -255,18 +256,19 @@ class Evaluator:
                     print 'Results for test', curr_chr
                     print 'num test instances', self.num_test_instances
                     y_pred = model.predict(X_test)
+
                     self.print_results(y_test, y_pred)
                     curr_chr = '-1'
 
                 if curr_chr == chromosome:
                     y_test[idx] = label
-
                     if isinstance(model, ConvNet):
-                        X_test[idx, :, :] = self.datareader.sequence_to_one_hot(sequence)
+                        X_test[idx, :, :] = self.datareader.sequence_to_one_hot(np.array(list(sequence)))
                     elif isinstance(model, DNNClassifier):
-                        X_test[idx, :, :] = self.datareader.sequence_to_one_hot_transpose(sequence)
+                        X_test[idx, :, :] = self.datareader.sequence_to_one_hot_transpose(np.array(list(sequence)))
                     else:
                         X_test[idx, :] = sequence_features
+
                     idx += 1
                 '''
                 # compute if dnase window needs to move
@@ -297,12 +299,25 @@ class Evaluator:
 
 
 if __name__ == '__main__':
-    #model = ConvNet('../log/', num_epochs=10, batch_size=512)
-    #model = RandomForestClassifier(n_estimators=100)
-    model = DNNClassifier(200, 4, 0.2, [100], [0.1, 0.5], verbose=True, max_epochs=5, batch_size=128)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model', help='[TFC/THC/RF]', required=True)
+    args = parser.parse_args()
 
-    evaluator = Evaluator('../data/')
-    evaluator.run_cross_cell_benchmark(model, save_train_set=True)
+    model = None
+
+    if args.model == 'TFC':
+        model = ConvNet('../log/', num_epochs=10, batch_size=512)
+    elif args.model == 'RF':
+        model = RandomForestClassifier(n_estimators=333, max_features="sqrt")
+    elif args.model == 'THC':
+        model = DNNClassifier(200, 4, 0.2, [100], [0.1, 0.5], verbose=True, max_epochs=1, batch_size=128)
+
+    else:
+        print "Model options: TFC (TensorFlow Convnet), THC (Theano Convnet), RF (Random Forest)"
+
+    if model is not None:
+        evaluator = Evaluator('../data/')
+        evaluator.run_cross_cell_benchmark(model, save_train_set=True)
 
 
 

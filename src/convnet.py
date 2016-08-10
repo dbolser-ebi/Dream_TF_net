@@ -205,8 +205,6 @@ class ConvNet:
                 elif early_score == 0:
                     if self.verbose:
                         print "Early stopping triggered, exiting..."
-
-
             summary_writer.add_graph(session.graph)
 
     def predict(self, X):

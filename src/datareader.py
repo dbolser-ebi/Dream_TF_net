@@ -11,6 +11,7 @@ import warnings
 class CrossvalOptions(Enum):
     filter_on_DNase_peaks = 1
     balance_peaks = 2
+    random_shuffle_10_percent = 3
 
 class DNasePeakEntry:
     def __init__(self, chromosome, start):
@@ -394,6 +395,13 @@ class DataReader:
                 random.shuffle(unbound_lines)
                 bound_lines.extend(unbound_lines[:len(bound_lines)])
                 position_tree.update(set(bound_lines))
+
+        elif CrossvalOptions.random_shuffle_10_percent in options:
+            with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+                fin.readline()
+                a = range(len(fin.read().splitlines()))
+                random.shuffle(a)
+                position_tree.update(a[:int(0.1*len(a))])
 
         with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin, \
                 open('../data/preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.txt') as f_seqfeat:

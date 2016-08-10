@@ -92,8 +92,8 @@ class DNNClassifier:
         layer = InputLayer(shape=(None, num_channels, length), name='Input')
         layer = DropoutLayer(layer, p=dropout_layers[0], name='Dropout_input')
 
-        layer = Conv1DLayer(layer, 15, 15)
-        layer = MaxPool1DLayer(layer, 35, 1)
+        layer = Conv1DLayer(layer, 15, 15, name='Convolution_1')
+        layer = MaxPool1DLayer(layer, 35, 1, name='MAXPool_1')
 
         for lidx, num_units in enumerate(hidden_layers):
             layer = DenseLayer(layer, num_units=num_units, name='Dense_%d' % (lidx+1))
@@ -131,4 +131,4 @@ class DNNClassifier:
         :require X.dtype == np.float32
         :param X: Input matrix
         '''
-        return self.clf.predict(X)
+        return self.clf.predict_proba(X)[:, 1]

@@ -12,6 +12,9 @@ def print_num_instances_for_each_chromosome():
 
     return chr_size
 
+def read_structure_features():
+
 
 if __name__ == '__main__':
-    print print_num_instances_for_each_chromosome()
+    #print print_num_instances_for_each_chromosome()
+    read_structure_features()
