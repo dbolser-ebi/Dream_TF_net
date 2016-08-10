@@ -90,7 +90,7 @@ class DNNClassifier:
         lasagne.layers.noise._srng = lasagne.layers.noise.RandomStreams(seed)
 
         layer = InputLayer(shape=(None, num_channels, length), name='Input')
-        #layer = DropoutLayer(layer, p=dropout_layers[0], name='Dropout_input')
+        layer = DropoutLayer(layer, p=dropout_layers[0], name='Dropout_input')
 
         layer = Conv1DLayer(layer, 15, 15)
         layer = MaxPool1DLayer(layer, 35, 1)

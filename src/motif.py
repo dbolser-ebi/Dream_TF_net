@@ -114,10 +114,15 @@ class MotifProcessor:
     def featurize_sequence(self, transcription_factor):
         pssms = map(lambda x: x.counts.normalize(pseudocounts=0.5).log_odds(), self.get_motifs(transcription_factor))
         celltypes = self.datareader.get_celltypes_for_tf(transcription_factor)
-        with gzip.open('../data/preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.gz', 'w') as fout:
-            for idx, instance in enumerate(self.datareader.generate_cross_celltype(transcription_factor,
-                                                                              celltypes)):
-                (_, _), sequence, _, _ = instance
+        with gzip.open(self.datapath + 'chipseq_labels/' + transcription_factor + '.train.labels.tsv.gz') as fin,\
+                gzip.open('../data/preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.gz', 'wb') as fout:
+            hg19 = Fasta('../data/annotations/hg19.genome.fa')
+            fin.readline()
+            for lidx, line in enumerate(fin):
+                tokens = line.split()
+                start = int(tokens[1])
+                chromosome = tokens[0]
+                sequence = hg19[chromosome][start:start + 200]
                 for i in xrange(len(pssms)):
                     score = pssms[i].calculate(Seq(sequence, pssms[i].alphabet))
                     arr = np.array([np.max(score), np.percentile(score, 90), np.percentile(score, 80),
@@ -127,8 +132,7 @@ class MotifProcessor:
                     arr[np.isnan(arr)] = -50000.0
                     for e in np.nditer(arr):
                         print>> fout, e,
-                print>>fout
-
+                    print>>fout
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

@@ -121,7 +121,7 @@ class Evaluator:
 
         print "Benchmark completed in: ", (time.time() - start_benchmark_time) / 3600, "hours."
 
-    def run_cross_cell_benchmark(self, model):
+    def run_cross_cell_benchmark(self, model, save_train_set=False):
         '''
         Run cross celltype benchmark for specified model and model_parameters
         :param datapath: path to data directory
@@ -129,9 +129,9 @@ class Evaluator:
         :param model_params: Model parameters
         :return:
         '''
+
         bin_length = 200
         chromosome_ordering = self.datareader.get_chromosome_ordering()
-
 
         print "Running cross celltype benchmark"
         for tf in ['CTCF']:
@@ -147,36 +147,47 @@ class Evaluator:
             celltypes_train = celltypes[:-1]
             celltype_test = celltypes[-1]
 
-            y_train_val = np.zeros((self.num_train_instances,), dtype=np.int32)
-
-            if isinstance(model, ConvNet):
-                X_train = np.zeros((self.num_train_instances, 200, 4), dtype=np.float16)
-                y_train = np.zeros((self.num_train_instances, len(celltypes_train)), dtype=np.float16)
-            elif isinstance(model, DNNClassifier):
-                X_train = np.zeros((self.num_train_instances, 4, 200), dtype=np.float32)
-                y_train = np.zeros((self.num_train_instances,), dtype=np.int32)
+            if os.path.exists(os.path.join(self.datapath, 'models/'+model.__class__.__name__+'Xtrain.npy')):
+                print "Loading train set from file"
+                X_train = np.load(os.path.join(self.datapath, 'models/'+model.__class__.__name__+'Xtrain.npy'))
+                y_train = np.load(os.path.join(self.datapath, 'models/'+model.__class__.__name__ + 'ytrain.npy'))
+                y_train_val = np.load(os.path.join(self.datapath, 'models/'+model.__class__.__name__ + 'ytrain_val.npy'))
             else:
-                X_train = np.zeros((self.num_train_instances, num_sequence_features), dtype=np.float32)
-                y_train = np.zeros((self.num_train_instances,), dtype=np.int32)
-
-            for idx, instance in enumerate(self.datareader.generate_cross_celltype(tf,
-                                           celltypes,
-                                           [CrossvalOptions.balance_peaks])):
-                if idx >= self.num_train_instances:
-                    break
-                (chromosome, start), sequence, sequence_features, labels = instance
+                y_train_val = np.zeros((self.num_train_instances,), dtype=np.int32)
 
                 if isinstance(model, ConvNet):
-                    X_train[idx, :, :] = self.datareader.sequence_to_one_hot(np.array(list(sequence)))
-                    y_train[idx, :] = labels[:-1]
+                    X_train = np.zeros((self.num_train_instances, 200, 4), dtype=np.float16)
+                    y_train = np.zeros((self.num_train_instances, len(celltypes_train)), dtype=np.float16)
                 elif isinstance(model, DNNClassifier):
-                    X_train[idx, :, :] = self.datareader.sequence_to_one_hot_transpose(np.array(list(sequence)))
-                    y_train[idx] = np.max(labels.flatten()[:-1])
+                    X_train = np.zeros((self.num_train_instances, 4, 200), dtype=np.float32)
+                    y_train = np.zeros((self.num_train_instances,), dtype=np.int32)
                 else:
-                    X_train[idx, :] = sequence_features
-                    y_train[idx] = np.max(labels.flatten()[:-1])
+                    X_train = np.zeros((self.num_train_instances, num_sequence_features), dtype=np.float32)
+                    y_train = np.zeros((self.num_train_instances,), dtype=np.int32)
 
-                y_train_val[idx] = labels.flatten()[-1]
+                for idx, instance in enumerate(self.datareader.generate_cross_celltype(tf,
+                                               celltypes,
+                                               [CrossvalOptions.balance_peaks])):
+                    if idx >= self.num_train_instances:
+                        break
+                    (chromosome, start), sequence, sequence_features, labels = instance
+
+                    if isinstance(model, ConvNet):
+                        X_train[idx, :, :] = self.datareader.sequence_to_one_hot(np.array(list(sequence)))
+                        y_train[idx, :] = labels[:, :-1]
+                    elif isinstance(model, DNNClassifier):
+                        X_train[idx, :, :] = self.datareader.sequence_to_one_hot_transpose(np.array(list(sequence)))
+                        y_train[idx] = np.max(labels.flatten()[:-1])
+                    else:
+                        X_train[idx, :] = sequence_features
+                        y_train[idx] = np.max(labels.flatten()[:-1])
+
+                    y_train_val[idx] = labels.flatten()[-1]
+
+            if save_train_set:
+                np.save(os.path.join(self.datapath, 'models/'+model.__class__.__name__+'Xtrain.npy'), X_train)
+                np.save(os.path.join(self.datapath, 'models/'+model.__class__.__name__ + 'ytrain.npy'), y_train)
+                np.save(os.path.join(self.datapath, 'models/' + model.__class__.__name__ + 'ytrain_val.npy'), y_train_val)
 
             model.fit(X_train, y_train)
 
@@ -191,7 +202,7 @@ class Evaluator:
 
             # --------------- TEST
             print "Running tests"
-            test_chromosomes = ['chr20', 'chr22']
+            test_chromosomes = ['chr10', 'chr20', 'chr22']
             curr_chr = '-1'
 
             '''
@@ -286,12 +297,12 @@ class Evaluator:
 
 
 if __name__ == '__main__':
-    #model = ConvNet('../log/', num_epochs=1, batch_size=512)
-    model = RandomForestClassifier(n_estimators=10)
-    #model = DNNClassifier(200, 4, 0.2, [100], [0.5], verbose=True, max_epochs=1, batch_size=512)
+    #model = ConvNet('../log/', num_epochs=10, batch_size=512)
+    #model = RandomForestClassifier(n_estimators=100)
+    model = DNNClassifier(200, 4, 0.2, [100], [0.1, 0.5], verbose=True, max_epochs=5, batch_size=128)
 
     evaluator = Evaluator('../data/')
-    evaluator.run_cross_cell_benchmark(model)
+    evaluator.run_cross_cell_benchmark(model, save_train_set=True)
 
 
 

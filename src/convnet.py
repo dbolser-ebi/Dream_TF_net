@@ -4,6 +4,17 @@ from sklearn.cross_validation import StratifiedKFold
 import time
 
 
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+
 def weight_variable(shape):
     initial = tf.truncated_normal(shape, stddev=0.1)
     return tf.Variable(initial)
@@ -30,14 +41,14 @@ def calc_loss(logits, labels):
 
 class EarlyStopping:
     def __init__(self, max_stalls):
-        self.best_acc = 0
+        self.best_loss = 0
         self.num_stalls = 0
         self.max_stalls = max_stalls
 
-    def update(self, acc):
-        if acc > self.best_acc:
+    def update(self, loss):
+        if loss < self.best_loss:
             self.num_stalls = 0
-            self.best_acc = acc
+            self.best_loss = loss
             return 2
         elif self.num_stalls < self.max_stalls:
             self.num_stalls += 1
@@ -163,6 +174,7 @@ class ConvNet:
 
                 # Validation
                 accuracies = []
+                losses = []
                 num_examples = X_val.shape[0]
                 prediction_op = tf.nn.sigmoid(self.logits)
                 for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
@@ -174,18 +186,27 @@ class ConvNet:
                         feed_dict = {self.tf_sequence: batch_sequence,
                                      self.tf_train_labels: batch_labels,
                                      self.keep_prob: 1}
-                        prediction = session.run([prediction_op], feed_dict=feed_dict)
+                        prediction, valid_loss = session.run([prediction_op, loss], feed_dict=feed_dict)
                         accuracies.append(100.0*np.sum(np.abs(prediction-batch_labels) < 0.5)/batch_labels.size)
-                t_acc = np.mean(np.array(accuracies))
+                        losses.append(valid_loss)
+                v_acc = np.mean(np.array(accuracies))
+                v_loss = np.mean(np.array(losses))
 
-                if self.verbose:
-                    print "EPOCH %d\t\tLOSS %f\t\tACC %.2f%%\t\tTIME %ds" % (epoch, float(t_loss), t_acc, int(time.time()-start_time))
-
-                early_score = self.early_stopping.update(t_acc)
+                early_score = self.early_stopping.update(v_loss)
                 if early_score == 2:
                     saver.save(session, self.model_dir + 'conv.ckpt')
+                    if self.verbose:
+                        print bcolors.OKGREEN+"EPOCH %d\t\tTRAIN LOSS %f\t\tVALID LOSS %f\t\tACC %.2f%%\t\tTIME %ds"+bcolors.ENDC \
+                              % (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
+                elif early_score:
+                    if self.verbose:
+                        print "EPOCH %d\t\tTRAIN LOSS %f\t\tVALID LOSS %f\t\tACC %.2f%%\t\tTIME %ds" \
+                              % (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
                 elif early_score == 0:
-                    break
+                    if self.verbose:
+                        print "Early stopping triggered, exiting..."
+
+
             summary_writer.add_graph(session.graph)
 
     def predict(self, X):
