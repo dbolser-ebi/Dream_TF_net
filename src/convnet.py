@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 from sklearn.cross_validation import StratifiedKFold
+
 import time
 
 
@@ -138,6 +139,9 @@ class ConvNet:
         with tf.Session() as session:
             tf.initialize_all_variables().run()
 
+            if self.verbose:
+                print "EPOCH\tTRAIN LOSS\tVALID LOSS\tVALID ACC\tTIME"
+
             # train model
             for epoch in xrange(1, self.num_epochs+1):
                 start_time = time.time()
@@ -196,12 +200,16 @@ class ConvNet:
                 if early_score == 2:
                     saver.save(session, self.model_dir + 'conv.ckpt')
                     if self.verbose:
-                        print bcolors.OKGREEN+"EPOCH %d\t\tTRAIN LOSS %f\t\tVALID LOSS %f\t\tACC %.2f%%\t\tTIME %ds"+bcolors.ENDC \
-                              % (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
+                        print bcolors.OKBLUE+"%d\t%f\t%f\t%.2f%%\t%ds"+bcolors.ENDC % \
+                              (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
+                        #print bcolors.OKGREEN+"EPOCH %d\t\tTRAIN LOSS %f\t\tVALID LOSS %f\t\tACC %.2f%%\t\tTIME %ds"+bcolors.ENDC \
+                        #      % (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
                 elif early_score:
                     if self.verbose:
-                        print "EPOCH %d\t\tTRAIN LOSS %f\t\tVALID LOSS %f\t\tACC %.2f%%\t\tTIME %ds" \
-                              % (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
+                        print "%d\t%f\t%f\t%.2f%%\t%ds" % \
+                              (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
+                        #print "EPOCH %d\t\tTRAIN LOSS %f\t\tVALID LOSS %f\t\tACC %.2f%%\t\tTIME %ds" \
+                        #      % (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
                 elif early_score == 0:
                     if self.verbose:
                         print "Early stopping triggered, exiting..."

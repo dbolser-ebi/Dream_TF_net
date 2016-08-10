@@ -1,12 +1,6 @@
 from datareader import *
-from convnet import *
-from naive import *
 from performance_metrics import *
 import argparse
-import time
-from wiggleReader import get_wiggle_output, wiggleToBedGraph, split_iter
-from sklearn.ensemble import RandomForestClassifier
-from theanonet import *
 
 
 class Evaluator:
@@ -20,7 +14,7 @@ class Evaluator:
         self.datapath = datapath
         self.datareader = DataReader(datapath)
 
-    def print_results(self, y_test, y_pred, test_name = '', outfile=''):
+    def print_results(self, y_test, y_pred, test_name='', outfile=''):
         TP = 0
         FP = 0
         TN = 0
@@ -54,7 +48,6 @@ class Evaluator:
                 print>>fout, 'RECALL AT FDR 0.25', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.25)
                 print>>fout, 'RECALL AT FDR 0.1', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.10)
                 print>>fout, 'RECALL AT FDR 0.05', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.05)
-
 
     def make_predictions(self, transcription_factor):
         tf_leaderboard = {
@@ -130,8 +123,8 @@ class Evaluator:
         :return:
         '''
 
-        bin_length = 200
-        chromosome_ordering = self.datareader.get_chromosome_ordering()
+        #bin_length = 200
+        #chromosome_ordering = self.datareader.get_chromosome_ordering()
 
         print "Running cross celltype benchmark"
         for tf in ['CTCF']:
@@ -203,7 +196,7 @@ class Evaluator:
             # --------------- TEST
             print
             print "RUNNING TESTS"
-            test_chromosomes = ['chr10', 'chr20', 'chr22']
+            test_chromosomes = ['chr10', 'chr2', 'chr20', 'chr22']
             curr_chr = '-1'
 
             '''
@@ -306,11 +299,14 @@ if __name__ == '__main__':
     model = None
 
     if args.model == 'TFC':
+        from convnet import *
         model = ConvNet('../log/', num_epochs=10, batch_size=512)
     elif args.model == 'RF':
+        from sklearn.ensemble import RandomForestClassifier
         model = RandomForestClassifier(n_estimators=333, max_features="sqrt")
     elif args.model == 'THC':
-        model = DNNClassifier(200, 4, 0.2, [100], [0.1, 0.5], verbose=True, max_epochs=1, batch_size=128)
+        from theanonet import *
+        model = DNNClassifier(200, 4, 0.2, [100], [0.1, 0.5], verbose=True, max_epochs=100, batch_size=64)
 
     else:
         print "Model options: TFC (TensorFlow Convnet), THC (Theano Convnet), RF (Random Forest)"
