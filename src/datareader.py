@@ -8,6 +8,10 @@ import random
 import warnings
 
 
+def optional_gzip_open(fname):
+    return gzip.open(fname) if fname.endswith(".gz") else open(fname)
+
+
 class CrossvalOptions(Enum):
     filter_on_DNase_peaks = 1
     balance_peaks = 2

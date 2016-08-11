@@ -33,6 +33,7 @@ class Evaluator:
         if outfile == '':
             print 'TP', TP, 'FP', FP, 'TN', TN, 'FN', FN
             print 'AUC ROC', auroc(y_test.flatten(), y_pred.flatten())
+            print 'AUC PRC SK', auprc_sklearn(y_test.flatten(), y_pred.flatten())
             print 'AUC PRC', auprc(y_test.flatten(), y_pred.flatten())
             print 'RECALL AT FDR 0.9', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.90)
             print 'RECALL AT FDR 0.5', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.50)
@@ -301,12 +302,12 @@ if __name__ == '__main__':
     model = None
 
     if args.model == 'TFC':
-        model = ConvNet('../log/', num_epochs=300, batch_size=512)
+        model = ConvNet('../log/', num_epochs=1, batch_size=512)
     elif args.model == 'RF':
         model = RandomForestClassifier(n_estimators=333, max_features="sqrt")
     elif args.model == 'THC':
         from theanonet import *
-        model = DNNClassifier(200, 4, 0.2, [100], [0.5], verbose=True, max_epochs=10, batch_size=512)
+        model = DNNClassifier(200, 4, 0.2, [100], [0.5], verbose=True, max_epochs=1, batch_size=512)
 
     else:
         print "Model options: TFC (TensorFlow Convnet), THC (Theano Convnet), RF (Random Forest)"

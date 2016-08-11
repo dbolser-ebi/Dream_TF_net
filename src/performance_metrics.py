@@ -1,14 +1,21 @@
 from sklearn.metrics import *
 import numpy as np
 from sklearn.metrics import precision_recall_curve, auc
-
+import rpy2
+import rpy2.robjects.numpy2ri
+rpy2.robjects.numpy2ri.activate()
+import rpy2.robjects as ro
 
 
 def auroc(y_true, y_model):
-    return roc_auc_score(y_true, y_model)
+    try:
+        auc = roc_auc_score(y_true, y_model)
+    except:
+        auc = 0
+    return auc
 
 
-def auprc(y_true, y_model):
+def auprc_sklearn(y_true, y_model):
     y_true = np.array(y_true, dtype=np.float32)
     y_model = np.array(y_model, dtype=np.float32)
     assert (y_true.size == y_model.size)
@@ -29,6 +36,11 @@ def auprc(y_true, y_model):
     result = auc(rec, prec)
 
     return result
+
+def auprc(y_true, y_model):
+    ro.globalenv['pred'] = y_model
+    ro.globalenv['labels'] = y_true
+    return ro.r('library(PRROC); pr.curve(scores.class0=pred, weights.class0=labels)$auc.davis.goadrich')[0]
 
 
 def recall_at_fdr(y_true, y_model, fdr_cutoff):
