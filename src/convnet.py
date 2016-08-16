@@ -1,7 +1,6 @@
 import tensorflow as tf
 import numpy as np
 from sklearn.cross_validation import StratifiedKFold
-
 import time
 
 
@@ -71,22 +70,23 @@ class ConvNet:
         self.width = width
         self.eval_size = eval_size
         self.verbose = verbose
+        self.gene_features = tf.placeholder(tf.float32, shape=(57820,), name='gene_expression_features')
         self.tf_sequence = tf.placeholder(tf.float32, shape=(batch_size, self.height,
                                           width, self.num_channels),
                                           name='features')
         self.tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_outputs), name='labels')
-        self.keep_prob = tf.placeholder(tf.float32)
-
-        self.logits = self.get_model()
+        self.keep_prob = tf.placeholder(tf.float32, name='keep_probability')
+        self.logits, self.summary_op = self.get_model()
         self.early_stopping = EarlyStopping(max_stalls=early_stopping)
-        self.transcription_factor = None
 
-    def set_transcription_factor(self, transcription_factor):
-        self.transcription_factor = transcription_factor
 
     def get_model(self):
-        # Convolution
-        with tf.variable_scope('conv1') as scope:
+        # SHAPE PATH
+
+        # KNOWN TF MOTIF PATH
+
+        # RANDINIT CONVOLUTION PATH
+        with tf.variable_scope('conv15/15') as scope:
             depth_1 = 15
             width_1 = 15
             conv_kernel = weight_variable(shape=[self.height, width_1, self.num_channels, depth_1])
@@ -94,32 +94,35 @@ class ConvNet:
             conv = conv1D(self.tf_sequence, conv_kernel)
             conv1 = tf.nn.relu(tf.nn.bias_add(conv, conv_biases))
 
-        # Pool
-        with tf.variable_scope('pool1') as scope:
+        with tf.variable_scope('pool35') as scope:
             pool_width_1 = 35
             pool1 = max_pool_1xn(conv1, pool_width_1)
 
-        # Dense
-        with tf.variable_scope('dense') as scope:
+        # MAINPATH
+        with tf.variable_scope('fc100') as scope:
             fc_kernel = weight_variable([5 * depth_1, 100])
             fc_bias = bias_variable([100])
-
             flattened = tf.reshape(pool1, [-1, 5 * depth_1])
+            #gene_expr_var = tf.constant([1.0]*1000*512, shape=(512, 1000))
+            #new_variable_data = tf.concat(1, [flattened, gene_expr_var])
+            #merged_variable = tf.assign(flattened, new_variable_data, validate_shape=False)
             fc1 = tf.nn.relu(tf.matmul(flattened, fc_kernel) + fc_bias)
 
-        # Dropout
         with tf.variable_scope('dropout') as scope:
             drop = tf.nn.dropout(fc1, self.keep_prob)
 
-        # Output
         with tf.variable_scope('output') as scope:
             fc_kernel2 = weight_variable([100, 1])
             fc_bias2 = bias_variable([1])
             logits = tf.matmul(drop, fc_kernel2) + fc_bias2
 
-        return logits
+        # TENSORBOARD SUMMARY INFO
+        conv_kernel_h = tf.histogram_summary('convkernel histogram', conv_kernel)
+        merged = tf.merge_all_summaries()
 
-    def fit(self, X, y):
+        return logits, merged
+
+    def fit(self, X, y, gene_expression=None):
         summary_writer = tf.train.SummaryWriter(self.model_dir + 'train')
 
         loss = calc_loss(self.logits, self.tf_train_labels)
@@ -144,12 +147,12 @@ class ConvNet:
                 print
                 print "EPOCH\tTRAIN LOSS\tVALID LOSS\tVALID ACCURACY\tTIME"
 
-            # train model
+            # Training
             for epoch in xrange(1, self.num_epochs+1):
                 start_time = time.time()
-                # Training
                 num_examples = X_train.shape[0]
                 losses = []
+
                 for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
                     end = min(offset+self.batch_size, num_examples)
                     for celltype_idx in xrange(y.shape[1]):
@@ -158,25 +161,25 @@ class ConvNet:
                         batch_labels = np.reshape(y_train[offset:end, celltype_idx], (self.batch_size, 1))
                         feed_dict = {self.tf_sequence: batch_sequence,
                                      self.tf_train_labels: batch_labels,
-                                     self.keep_prob: 0.5}
-                        _, r_loss = session.run([optimizer, loss], feed_dict=feed_dict)
-                        '''
-                        run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-                        run_metadata = tf.RunMetadata()
+                                     self.keep_prob: 0.5
+                                     }
+                        if np.random.rand() <= 0.8 or celltype_idx != 0:
+                            _, r_loss = session.run([optimizer, loss], feed_dict=feed_dict)
+                        else:
+                            run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+                            run_metadata = tf.RunMetadata()
 
-                        summary, _, r_loss = session.run([summary_op, optimizer, loss],
-                                                         feed_dict=feed_dict,
-                                                         options=run_options,
-                                                         run_metadata=run_metadata)
-                        if self.model_dir is not None:
-                            summary_writer.add_summary(summary)
-                            summary_writer.add_run_metadata(run_metadata, 'Epoch %d, offset %d' % (epoch, offset))
-                        '''
+                            summary, _, r_loss = session.run([self.summary_op, optimizer, loss],
+                                                             feed_dict=feed_dict,
+                                                             options=run_options,
+                                                             run_metadata=run_metadata)
+                            if self.model_dir is not None:
+                                summary_writer.add_summary(summary)
+                                summary_writer.add_run_metadata(run_metadata, 'Epoch %d, offset %d' % (epoch, offset))
+
                         losses.append(r_loss)
-                t_loss = np.mean(np.array(losses))
-
-                #loss_summary = tf.scalar_summary('Mean loss training', t_loss)
-                #summary_writer.add_summary(loss_summary)
+                losses = np.array(losses)
+                t_loss = np.mean(losses)
 
                 # Validation
                 accuracies = []
@@ -191,7 +194,8 @@ class ConvNet:
                         batch_labels = np.reshape(y_val[offset:end, celltype_idx], (self.batch_size, 1))
                         feed_dict = {self.tf_sequence: batch_sequence,
                                      self.tf_train_labels: batch_labels,
-                                     self.keep_prob: 1}
+                                     self.keep_prob: 1,
+                                     }
                         prediction, valid_loss = session.run([prediction_op, loss], feed_dict=feed_dict)
                         accuracies.append(100.0*np.sum(np.abs(prediction-batch_labels) < 0.5)/batch_labels.size)
                         losses.append(valid_loss)
@@ -211,9 +215,10 @@ class ConvNet:
                 elif early_score == 0:
                     if self.verbose:
                         print "Early stopping triggered, exiting..."
+
             summary_writer.add_graph(session.graph)
 
-    def predict(self, X):
+    def predict(self, X, gene_expression=None):
         '''
         Run trained model
         :return: predictions
@@ -231,7 +236,8 @@ class ConvNet:
                                             (self.batch_size, self.height, self.width, self.num_channels))
 
                 feed_dict = {self.tf_sequence: batch_sequence,
-                             self.keep_prob: 1}
+                             self.keep_prob: 1
+                             }
                 prediction = session.run([prediction_op], feed_dict=feed_dict)
                 prediction = prediction[0][offset-offset_:]
                 predictions.extend(prediction)

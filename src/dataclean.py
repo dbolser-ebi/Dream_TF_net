@@ -14,8 +14,20 @@ def make_dnase_naming_consistent(fpath):
                     fpath+'DNASE.IMR-90.conservative.narrowPeak.gz')
 
 
+def make_rnaseq_naming_consistent(fpath):
+    if os.path.exists(fpath+'gene_expression.IMR90.biorep1.tsv'):
+        print 'Renaming', 'gene_expression.IMR90.biorep1.tsv'
+        shutil.move(fpath+'gene_expression.IMR90.biorep1.tsv',
+                    fpath+'gene_expression.IMR-90.biorep1.tsv')
+    if os.path.exists(fpath+'gene_expression.IMR90.biorep2.tsv'):
+        print 'Renaming', 'gene_expression.IMR90.biorep2.tsv'
+        shutil.move(fpath+'gene_expression.IMR90.biorep2.tsv',
+                    fpath+'gene_expression.IMR-90.biorep2.tsv')
+
+
 def make_naming_consistent(fpath):
     make_dnase_naming_consistent(fpath+'dnase_peaks_conservative/')
+    make_rnaseq_naming_consistent(fpath+'rnaseq/')
 
 
 def clean_duplicate(num, path):

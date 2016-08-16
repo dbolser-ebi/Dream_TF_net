@@ -12,6 +12,13 @@ def optional_gzip_open(fname):
     return gzip.open(fname) if fname.endswith(".gz") else open(fname)
 
 
+def conditional_open(fname):
+    if os.path.exists(fname):
+        return optional_gzip_open(fname)
+    else:
+        return None
+
+
 class CrossvalOptions(Enum):
     filter_on_DNase_peaks = 1
     balance_peaks = 2
@@ -111,9 +118,9 @@ class DataReader:
         '''
         files = [f for f in os.listdir(os.path.join(self.datapath, self.label_path))]
         celltypes = []
-        for f in files:
-            if transcription_factor in f:
-                fpath = os.path.join(self.datapath, os.path.join(self.label_path, f))
+        for f_name in files:
+            if transcription_factor in f_name:
+                fpath = os.path.join(self.datapath, os.path.join(self.label_path, f_name))
                 with gzip.open(fpath) as fin:
                     header_tokens = fin.readline().split()
                     celltypes = header_tokens[3:]
@@ -314,6 +321,49 @@ class DataReader:
 
         return reduce(calculate_instances, dna_peaks, 0)
 
+    def get_num_bound_lines(self, transcription_factor):
+        mp = {'YY1': 414733, 'JUND': 734552, 'MAFK': 442379, 'TEAD4': 576098, 'CEBPB': 984566, 'ZNF143': 312498,
+         'SPI1': 200845, 'NANOG': 32918, 'EGR1': 267537, 'GATA3': 496617, 'MYC': 347756, 'SRF': 229617, 'REST': 255624,
+         'CREB1': 391070, 'STAT3': 108787, 'EP300': 789926, 'ATF7': 732843, 'ARID3A': 132702, 'E2F6': 303125,
+         'E2F1': 127319, 'TAF1': 342390, 'RFX5': 237118, 'MAX': 1115468, 'HNF4A': 106308, 'TCF7L2': 322078,
+         'FOXA1': 256632, 'FOXA2': 374750, 'ATF3': 455348, 'TCF12': 568606, 'GABPA': 219328, 'CTCF': 497961,
+         'ATF2': 380831}
+        return mp[transcription_factor]
+
+    def get_gene_expression_tpm(self, celltypes):
+        features = None
+        for idx, celltype in enumerate(celltypes):
+            with open(os.path.join(self.datapath, 'rnaseq/gene_expression.{}.biorep1.tsv'.format(celltype))) as fin1,\
+                    open(os.path.join(self.datapath, 'rnaseq/gene_expression.{}.biorep2.tsv'.format(celltype))) as fin2:
+                tpm1 = []
+                tpm2 = []
+                fin1.readline()
+                fin2.readline()
+                for line in fin1:
+                    tokens = line.split()
+                    tpm1.append(float(tokens[5]))
+                for line in fin2:
+                    tokens = line.split()
+                    tpm2.append(float(tokens[5]))
+
+                tpm1 = np.array(tpm1, dtype=np.float32)
+                tpm2 = np.array(tpm2, dtype=np.float32)
+
+                tpm1 = (tpm1 + tpm2) / 2
+
+                if idx == 0:
+                    features = tpm1
+                else:
+                    features = np.vstack((features, tpm1))
+        return features
+
+    def get_chromosomes(self):
+        chromosomes =['chr7', 'chr6', 'chr5', 'chr4', 'chr3', 'chr2',
+                   'chr9', 'chrX', 'chr13', 'chr12', 'chr11',
+                   'chr10', 'chr17', 'chr16', 'chr15', 'chr14', 'chr20',
+                   'chr22','chr19', 'chr18']
+        return chromosomes
+
     def get_num_instances(self, chromosome):
         chr_num = {'chr7': 3151146, 'chr6': 3419293, 'chr5': 3602250, 'chr4': 3812501, 'chr3': 3955446, 'chr2': 4857748,
          'chr9': 2817543, 'chrX': 3097086, 'chr13': 2303355, 'chr12': 2659379, 'chr11': 2672380, 'chr10': 2702470,
@@ -375,9 +425,7 @@ class DataReader:
                     while chr_dnase == chromosome and start_dnase + bin_length < start \
                             and d_idx < len(dnase_peaks) - 1:
                         d_idx += 1
-
                     (chr_dnase, start_dnase, _) = dnase_peaks[d_idx]
-
                     if chr_dnase == chromosome \
                             and (start <= start_dnase + bin_length
                                  and start_dnase <= start + bin_length):
@@ -390,12 +438,10 @@ class DataReader:
                 unbound_lines = []
                 # only the train set
                 for line_idx, line in enumerate(fin):
-                    if 'B' in line[:-2]:
+                    if 'B' in line:
                         bound_lines.append(line_idx)
                     else:
                         unbound_lines.append(line_idx)
-
-                print "num bound lines", len(bound_lines)
                 random.shuffle(unbound_lines)
                 bound_lines.extend(unbound_lines[:len(bound_lines)])
                 position_tree.update(set(bound_lines))
@@ -408,14 +454,17 @@ class DataReader:
                 position_tree.update(a[:int(0.1*len(a))])
 
         with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin, \
-                open('../data/preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.txt') as f_seqfeat:
+                conditional_open(os.path.join(self.datapath, 'preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.txt')) as f_seqfeat:
             celltype_names = fin.readline().split()[3:]
             idxs = []
             for i, celltype in enumerate(celltype_names):
                 if celltype in celltypes:
                     idxs.append(i)
             for lidx, line in enumerate(fin):
-                sequence_features = np.array(map(float, f_seqfeat.readline().split()), dtype=np.float32)
+                if f_seqfeat is not None:
+                    sequence_features = np.array(map(float, f_seqfeat.readline().split()), dtype=np.float32)
+                else:
+                    sequence_features = None
                 if len(position_tree) == 0 or lidx in position_tree:
                     tokens = line.split()
                     bound_states = tokens[3:]
@@ -453,3 +502,7 @@ class DataReader:
                                 labels[combination_to_idx[(tf, celltype)]] = 1
                     yield features, labels
 
+if __name__ == '__main__':
+    datareader = DataReader('../data/')
+    features = datareader.get_gene_expression_tpm(['MCF-7', 'liver'])
+    print features.shape
