@@ -113,9 +113,8 @@ class MotifProcessor:
 
     def featurize_sequence(self, transcription_factor):
         pssms = map(lambda x: x.counts.normalize(pseudocounts=0.5).log_odds(), self.get_motifs(transcription_factor))
-        celltypes = self.datareader.get_celltypes_for_tf(transcription_factor)
         with gzip.open(self.datapath + 'chipseq_labels/' + transcription_factor + '.train.labels.tsv.gz') as fin,\
-                gzip.open('../data/preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.gz', 'wb') as fout:
+                open('../data/preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.txt', 'w') as fout:
             hg19 = Fasta('../data/annotations/hg19.genome.fa')
             fin.readline()
             for lidx, line in enumerate(fin):
@@ -140,6 +139,5 @@ if __name__ == '__main__':
     args = parser.parse_args()
     mp = MotifProcessor('../data/')
     mp.featurize_sequence(transcription_factor=args.tf)
-    #mp.print_dnaseq_signal()
 
 

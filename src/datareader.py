@@ -6,6 +6,7 @@ from enum import Enum
 import math
 import random
 import warnings
+from sklearn.decomposition import PCA
 
 
 def optional_gzip_open(fname):
@@ -23,6 +24,7 @@ class CrossvalOptions(Enum):
     filter_on_DNase_peaks = 1
     balance_peaks = 2
     random_shuffle_10_percent = 3
+
 
 class DNasePeakEntry:
     def __init__(self, chromosome, start):
@@ -331,10 +333,13 @@ class DataReader:
         return mp[transcription_factor]
 
     def get_gene_expression_tpm(self, celltypes):
+        idxs = []
         features = None
-        for idx, celltype in enumerate(celltypes):
+        for idx, celltype in enumerate(self.get_celltypes()):
             with open(os.path.join(self.datapath, 'rnaseq/gene_expression.{}.biorep1.tsv'.format(celltype))) as fin1,\
                     open(os.path.join(self.datapath, 'rnaseq/gene_expression.{}.biorep2.tsv'.format(celltype))) as fin2:
+                if celltype in celltypes:
+                    idxs.append(idx)
                 tpm1 = []
                 tpm2 = []
                 fin1.readline()
@@ -355,7 +360,10 @@ class DataReader:
                     features = tpm1
                 else:
                     features = np.vstack((features, tpm1))
-        return features
+        #shiftscaled = (features - np.mean(features, axis=0)) / (np.std(features, axis=0) + 1)
+        #return shiftscaled[idxs]
+        pca = PCA(whiten=True)
+        return pca.fit_transform(features)
 
     def get_chromosomes(self):
         chromosomes =['chr7', 'chr6', 'chr5', 'chr4', 'chr3', 'chr2',
@@ -371,37 +379,49 @@ class DataReader:
          'chr19': 1165049, 'chr18': 1561114}
         return chr_num[chromosome]
 
-    def generate_within_celltype(self, transcription_factor, celltype, chromosomes, options=None):
-        if options == CrossvalOptions.filter_on_DNase_peaks:
-            chipseq_peaks = self.get_chipseq_peaks_tree_for_tf(transcription_factor)
-            dnase_peaks = self.get_DNAse_peaks([celltype])
-            for (chromosome, start, stop) in dnase_peaks:
-                if chromosome in chromosomes:
-                    self.hg19[chromosome].as_string = False
-                    for i in range(start, stop - self.sequence_length, self.stride):
-                        features = self.sequence_to_one_hot(self.hg19[chromosome][i:i + self.sequence_length])
-                        labels = np.zeros((1, 1), dtype=np.float32)
-                        if TFPeakEntry(celltype, chromosome, i) in chipseq_peaks:
-                            labels[0] = 1
-                        yield features, labels
-        else:
-            with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
-                celltype_names = fin.readline().split()[3:]
-                idxs = []
-                for i, celltype in enumerate(celltype_names):
-                    if celltype in celltypes:
-                        idxs.append(i)
-                for position, line in enumerate(fin):
-                    tokens = line.split()
-                    bound_states = tokens[3:]
-                    start = int(tokens[1])
-                    chromosome = tokens[0]
-                    features = self.hg19[chromosome][start:start + self.sequence_length]
-                    labels = np.zeros((1, len(celltypes)), dtype=np.float32)
-                    for i, idx in enumerate(idxs):
-                        if bound_states[idx] == 'B':
-                            labels[:, i] = 1
-                    yield (chromosome, start), features, labels
+    def get_motifs_h(self, transcription_factor):
+        motifs = []
+        # Try Jaspar
+        JASPAR_dir = os.path.join(self.datapath, 'preprocess/JASPAR/')
+        for f in os.listdir(JASPAR_dir):
+            if transcription_factor.upper() in f.upper():
+                # print "motif found in JASPAR"
+                motifs.append(np.loadtxt(os.path.join(JASPAR_dir, f), dtype=np.float32, unpack=True))
+
+        # Try SELEX
+        SELEX_dir = os.path.join(self.datapath, 'preprocess/SELEX_PWMs_for_Ensembl_1511_representatives/')
+        for f in os.listdir(SELEX_dir):
+            if f.upper().startswith(transcription_factor.upper()):
+                # print "motif found in SELEX"
+                motifs.append(np.loadtxt(os.path.join(SELEX_dir, f), dtype=np.float32, unpack=True))
+
+        return motifs
+
+    def calc_pssm(self, pfm, pseudocounts=0.001):
+        pfm += pseudocounts
+        norm_pwm = pfm / pfm.sum(axis=1)[:, np.newaxis]
+        return np.log2(norm_pwm / 0.25)
+
+    def get_shape_features(self, chromosome):
+        def replaceNA(x):
+            if x == 'NA':
+                return 0
+            else:
+                return x
+
+        with open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.MGW')) as fin:
+            out = []
+            skip = True
+            for line in fin:
+                if line.startswith('>'+chromosome):
+                    skip = False
+                elif skip:
+                    continue
+                elif line.startswith('>chr'):
+                    break
+                else:
+                    out.extend(line.strip().split(','))
+            return map(replaceNA, out)
 
     def generate_cross_celltype(self, transcription_factor, celltypes, options=[]):
         position_tree = set()  # keeps track of which lines (chr, start) to include
@@ -453,8 +473,12 @@ class DataReader:
                 random.shuffle(a)
                 position_tree.update(a[:int(0.1*len(a))])
 
-        with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin, \
-                conditional_open(os.path.join(self.datapath, 'preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.txt')) as f_seqfeat:
+        with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+            curr_chromosome = 'chr10'
+            shape_features = self.get_shape_features(curr_chromosome)
+
+            f_seqfeat = conditional_open(os.path.join(self.datapath,
+                                         'preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.txt'))
             celltype_names = fin.readline().split()[3:]
             idxs = []
             for i, celltype in enumerate(celltype_names):
@@ -472,35 +496,19 @@ class DataReader:
                     chromosome = tokens[0]
                     sequence = self.hg19[chromosome][start:start + self.sequence_length]
                     labels = np.zeros((1, len(celltypes)), dtype=np.float32)
+
+                    if chromosome != curr_chromosome:
+                        curr_chromosome = chromosome
+                        shape_features = self.get_shape_features(chromosome)
+
                     for i, idx in enumerate(idxs):
                         if bound_states[idx] == 'B':
                             labels[:, i] = 1
-                    yield (chromosome, start), sequence, sequence_features, labels
+                    yield (chromosome, start), sequence, sequence_features, \
+                        shape_features[start:start+self.sequence_length], labels
 
-    def generate_multi_task(self, tf_mapping, options=None):
-        if options == CrossvalOptions.filter_on_DNase_peaks:
-            celltypes = set()
-            for tf in tf_mapping:
-                for celltype in tf_mapping[tf]:
-                    celltypes.add(celltype)
-
-            celltypes = list(celltypes)
-            dnase_peaks = self.get_DNAse_peaks(celltypes)
-            chipseq_peaks = self.get_chipseq_peaks_tree()
-
-            combination_to_idx = self.get_combination_to_idx_mapping()
-
-            for (chromosome, start, stop) in dnase_peaks:
-                self.hg19[chromosome].as_string = False
-                for i in range(start, stop - self.sequence_length, self.stride):
-                    features = self.sequence_to_one_hot(self.hg19[chromosome][i:i+self.sequence_length])
-                    labels = np.zeros((1, len(self.get_tf_celltype_combinations())), dtype=np.float32)
-                    for tf in tf_mapping:
-                        for celltype in tf_mapping[tf]:
-                            if PeakEntry(tf, celltype, chromosome, i) in chipseq_peaks:
-                                print combination_to_idx[(tf, celltype)]
-                                labels[combination_to_idx[(tf, celltype)]] = 1
-                    yield features, labels
+            if f_seqfeat is not None:
+                f_seqfeat.close()
 
 if __name__ == '__main__':
     datareader = DataReader('../data/')

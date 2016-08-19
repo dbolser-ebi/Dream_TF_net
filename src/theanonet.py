@@ -117,7 +117,7 @@ class DNNClassifier:
                         )
         self.clf = clf
 
-    def fit(self, X, y):
+    def fit(self, X, y, S=None, gene_expression=None):
         '''
         :require X.dtype == np.float32
         :require y.dtype == np.int32
@@ -126,7 +126,7 @@ class DNNClassifier:
         '''
         return self.clf.fit(X, y)
 
-    def predict(self, X):
+    def predict(self, X, S=None, gene_expression=None):
         '''
         :require X.dtype == np.float32
         :param X: Input matrix
