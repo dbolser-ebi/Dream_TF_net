@@ -2,7 +2,6 @@ from datareader import *
 from performance_metrics import *
 import argparse
 from convnet import *
-from sklearn.ensemble import RandomForestClassifier
 import sqlite3
 
 
@@ -75,9 +74,6 @@ class Evaluator:
     def get_X(self, model, num_instances):
         if isinstance(model, ConvNet):
             X = np.zeros((num_instances, 200, 4), dtype=np.float32)
-        elif isinstance(model, RandomForestClassifier):
-            num_sequence_features = self.datareader.get_num_sequence_features(tf)
-            X = np.zeros((num_instances, num_sequence_features), dtype=np.float32)
         else:
             X = np.zeros((num_instances, 4, 200), dtype=np.float32)
         return X
@@ -92,8 +88,6 @@ class Evaluator:
     def get_y_train(self, model, num_instances, num_celltypes):
         if isinstance(model, ConvNet):
             y_train = np.zeros((num_instances, num_celltypes), dtype=np.float16)
-        elif isinstance(model, RandomForestClassifier):
-            y_train = np.zeros((num_instances,), dtype=np.int32)
         else:
             y_train = np.zeros((num_instances,), dtype=np.int32)
         return y_train
@@ -101,8 +95,6 @@ class Evaluator:
     def get_y_test(self, model, num_instances):
         if isinstance(model, ConvNet):
             y_test = np.zeros((num_instances,), dtype=np.float16)
-        elif isinstance(model, RandomForestClassifier):
-            y_test = np.zeros((num_instances,), dtype=np.int32)
         else:
             y_test = np.zeros((num_instances,), dtype=np.int32)
         return y_test
@@ -126,8 +118,6 @@ class Evaluator:
     def get_X_data(self, model, sequence, sequence_features=None):
         if isinstance(model, ConvNet):
             return self.datareader.sequence_to_one_hot(np.array(list(sequence)))
-        elif isinstance(model, RandomForestClassifier):
-            return sequence_features
         else:
             return self.datareader.sequence_to_one_hot_transpose(np.array(list(sequence)))
 
@@ -280,8 +270,8 @@ class Evaluator:
                                            [CrossvalOptions.balance_peaks])):
                 if idx >= self.num_train_instances:
                     break
-                (_, _), sequence, sequence_features, shape_features, labels = instance
-                X_train[idx] = self.get_X_data(model, sequence, sequence_features)
+                (_, _), sequence, shape_features, labels = instance
+                X_train[idx] = self.get_X_data(model, sequence)
                 S_train[idx] = self.get_S_data(model, shape_features)
                 y_train[idx] = self.get_y_train_data(model, labels)
                 y_train_val[idx] = labels.flatten()[-1]
@@ -322,7 +312,7 @@ class Evaluator:
 
         for instance in self.datareader.generate_cross_celltype(transcription_factor,
                                                                 [celltypes_test]):
-            (chromosome, start), sequence, sequence_features, shape_features, label = instance
+            (chromosome, start), sequence, shape_features, label = instance
             if curr_chr == '-1' and chromosome in test_chromosomes:
                 curr_chr = chromosome
                 self.num_test_instances = self.datareader.get_num_instances(chromosome)
@@ -361,7 +351,7 @@ class Evaluator:
 
             if curr_chr == chromosome:
                 y_test[idx] = label
-                X_test[idx] = self.get_X_data(model, sequence, sequence_features)
+                X_test[idx] = self.get_X_data(model, sequence)
                 S_test[idx] = self.get_S_data(model, shape_features)
                 idx += 1
 
@@ -374,7 +364,7 @@ class Evaluator:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--transcription_factor', '-tf', help='Choose transcription factor', required=True)
-    parser.add_argument('--model', '-m', help='Choose model [TFC/THC/RF]', required=True)
+    parser.add_argument('--model', '-m', help='Choose model [TFC/THC]', required=True)
     parser.add_argument('--validate', '-v', action='store_true', help='run cross TF validation benchmark', required=False)
     parser.add_argument('--predict', '-p', action='store_true', help='predict TF ladderboard', required=False)
     parser.add_argument('--config', '-c', help='configuration of model', required=False)
@@ -383,9 +373,8 @@ if __name__ == '__main__':
     model = None
 
     if args.model == 'TFC':
-        model = ConvNet('../log/', num_epochs=1, batch_size=512, num_gen_expr_features=14, config=args.config, dropout_rate=0.25)
-    elif args.model == 'RF':
-        model = RandomForestClassifier(n_estimators=333, max_features="sqrt")
+        model = ConvNet('../log/', num_epochs=20, batch_size=512,
+                        num_gen_expr_features=32, config=args.config, dropout_rate=0.25, transcription_factor=args.transcription_factor)
     elif args.model == 'THC':
         from theanonet import *
         model = DNNClassifier(200, 4, 0.2, [100], [0.5], verbose=True, max_epochs=100, batch_size=512)

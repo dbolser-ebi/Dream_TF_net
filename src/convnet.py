@@ -2,6 +2,8 @@ import tensorflow as tf
 import numpy as np
 from sklearn.cross_validation import StratifiedKFold
 import time
+from datareader import DataReader
+from tensorflow.contrib.layers.python.layers import *
 
 
 class configuration():
@@ -34,8 +36,8 @@ def bias_variable(shape):
     return tf.Variable(initial)
 
 
-def conv1D(x, W):
-    return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='VALID')
+def conv1D(x, W, strides=[1, 1, 1, 1]):
+    return tf.nn.conv2d(x, W, strides=strides, padding='VALID')
 
 
 def max_pool_1xn(x, width):
@@ -70,9 +72,10 @@ class ConvNet:
     def __init__(self, model_dir, batch_size=256, num_channels=4, num_epochs=2,
                  width=200, num_outputs=1, eval_size=0.2, early_stopping=100,
                  num_gen_expr_features=57820, num_shape_features=1, dropout_rate=.5,
-                 config=configuration.SEQ, verbose=True):
+                 config=configuration.SEQ, verbose=True, datapath ='../data/', transcription_factor='CTCF'):
         if config is None:
             config = configuration.SEQ
+        self.datareader = DataReader(datapath)
         self.config = config
         self.num_outputs = num_outputs
         self.num_channels = num_channels
@@ -93,51 +96,56 @@ class ConvNet:
                                           width, self.num_channels), name='sequences')
         self.tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_outputs), name='labels')
         self.keep_prob = tf.placeholder(tf.float32, name='keep_probability')
-        self.logits, self.summary_op = self.get_model()
         self.early_stopping = EarlyStopping(max_stalls=early_stopping)
         self.dropout_rate = dropout_rate
+        self.transcription_factor = transcription_factor
+
+        self.logits, self.summary_op = self.get_model()
+
 
     def get_config(self):
         return int(self.config)
 
     def get_model(self):
-
         with tf.variable_scope('USUAL_SUSPECTS') as scope:
-            with tf.variable_scope('convtest') as convscope:
-                conv_kernel = tf.get_variable('test', [1, 10, 4, 1], tf.float32, initializer=tf.constant_initializer(
-                    np.reshape(np.array([[0.89723307, -0.1827697, 0.1445078, -2.72598481],
-                           [-7.43275166, -7.3896842, -9.47700882, 1.99524772],
-                           [-8.52434158, -8.80443192, -1.45960414, 1.86054754],
-                           [0.8061344, -7.52236605, 0.91699457, -1.48252141],
-                           [-4.02338076, 1.83066714, -4.85386086, -1.52737629],
-                           [-0.9545266, -3.61995006, 1.73614061, -3.811481],
-                           [-1.43852019, 1.73070645, -11.15628719, -1.68170977],
-                           [1.95963442, -3.19991755, -9.34271717, -22.4785862],
-                           [1.99885762, -9.30349445, -22.43936348, -9.30349445],
-                           [-5.26423645, 0.83371818, -2.66385198, 1.02425551]], dtype=np.float32), (1, 10, 4, 1))
-                ))
-                depth = 1
-                width = 10
-                conv_biases = tf.zeros(shape=[depth])
-                conv = conv1D(self.tf_sequence, conv_kernel)
-                activation = tf.nn.relu(tf.nn.bias_add(conv, conv_biases))
+            num_latent_factors = 0
+            activations = []
+            for transcription_factor in self.datareader.get_tfs():
+                if int(self.config) == int(configuration.USUAL) and transcription_factor != self.transcription_factor:
+                    continue
+                motifs = self.datareader.get_motifs_h(transcription_factor)
+                if len(motifs) > 0:
+                    with tf.variable_scope(transcription_factor) as tfscope:
+                        for idx, motif in enumerate(motifs):
+                            pssm = self.datareader.calc_pssm(motif)
+                            conv_kernel = tf.get_variable('motif_%d' % idx, shape=(1, pssm.shape[0], pssm.shape[1], 1), dtype=tf.float32,
+                                                          initializer=tf.constant_initializer(
+                                                              pssm
+                            ), trainable=False)
+                            depth = 1
+                            width = pssm.shape[0]
+                            conv_biases = tf.zeros(shape=[depth])
+                            stride = 1
+                            conv = conv1D(self.tf_sequence, conv_kernel, strides=[1, 1, stride, 1])
+                            activation = tf.nn.relu(tf.nn.bias_add(conv, conv_biases))
+                            num_nodes = (self.width-width)/stride+1
+                            flattened = tf.reshape(activation, [-1, num_nodes])
+                            num_latent_factors += num_nodes
+                            activations.append(flattened)
 
-            with tf.variable_scope('fc10') as fcscope:
-                flattened = tf.reshape(activation, [-1, 191])
-                fc_kernel = weight_variable([191, 10])
-                fc_bias = bias_variable([10])
-                activation = tf.nn.relu(tf.nn.bias_add(tf.matmul(flattened, fc_kernel), fc_bias))
-
-            with tf.variable_scope('dropout') as dropscope:
-                drop_usual = tf.nn.dropout(activation, self.keep_prob)
+            with tf.variable_scope('fc100') as fcscope:
+                fc_kernel = weight_variable([num_latent_factors, 100])
+                fc_bias = bias_variable([100])
+                drop_usual = tf.nn.relu(tf.nn.bias_add(tf.matmul(tf.concat(1, activations), fc_kernel), fc_bias))
+                drop_usual = batch_norm(drop_usual)
 
         with tf.variable_scope('GENEXPR') as scope:
+
             with tf.variable_scope('fc100') as fcscope:
                 fc_kernel = weight_variable([self.num_genexpr_features, 100])
                 fc_bias = bias_variable([100])
-                activation = tf.nn.relu(tf.matmul(self.tf_gene_expression, fc_kernel) + fc_bias)
-            with tf.variable_scope('dropout') as dropscope:
-                drop_genexpr = tf.tile(tf.nn.dropout(activation, self.keep_prob), [self.batch_size, 1])
+                drop_genexpr = tf.tile(tf.nn.relu(tf.matmul(self.tf_gene_expression, fc_kernel) + fc_bias), [self.batch_size, 1])
+                drop_genexpr = batch_norm(drop_genexpr)
 
         with tf.variable_scope('SHAPE') as scope:
             with tf.variable_scope('conv15_10') as convscope:
@@ -146,42 +154,38 @@ class ConvNet:
                 conv_kernel = weight_variable(shape=[self.height, width, self.num_shape_features, depth])
                 conv_biases = weight_variable(shape=[depth])
                 conv = conv1D(self.tf_shape, conv_kernel)
-                activation = tf.nn.relu(tf.nn.bias_add(conv, conv_biases))
+                activation = tf.nn.bias_add(conv, conv_biases)
 
             with tf.variable_scope('pool35') as poolscope:
                 pool_width = 35
-                pool = max_pool_1xn(activation, pool_width)
+                pool = tf.nn.relu(max_pool_1xn(activation, pool_width))
 
             with tf.variable_scope('fc100') as fcscope:
                 fc_kernel = weight_variable([5*depth, 100])
                 fc_bias = bias_variable([100])
                 flattened = tf.reshape(pool, [-1, 5*depth])
-                activation = tf.nn.relu(tf.matmul(flattened, fc_kernel) + fc_bias)
-
-            with tf.variable_scope('dropout') as dropscope:
-                drop_shape = tf.nn.dropout(activation, self.keep_prob)
+                drop_shape = tf.nn.relu(tf.matmul(flattened, fc_kernel) + fc_bias)
+                drop_shape = batch_norm(drop_shape)
 
         with tf.variable_scope('R_MOTIF') as scope:
             with tf.variable_scope('conv15_15') as convscope:
-                depth = 15
+                depth = 30
                 width = 15
                 conv_kernel = weight_variable(shape=[self.height, width, self.num_channels, depth])
                 conv_biases = weight_variable(shape=[depth])
                 conv = conv1D(self.tf_sequence, conv_kernel)
-                activation = tf.nn.relu(tf.nn.bias_add(conv, conv_biases))
+                activation = tf.nn.bias_add(conv, conv_biases)
 
             with tf.variable_scope('pool35') as poolscope:
                 pool_width = 35
-                pool = max_pool_1xn(activation, pool_width)
+                pool = tf.nn.relu(max_pool_1xn(activation, pool_width))
 
             with tf.variable_scope('fc100') as fcscope:
                 fc_kernel = weight_variable([5 * depth, 100])
                 fc_bias = bias_variable([100])
                 flattened = tf.reshape(pool, [-1, 5 * depth])
-                activation = tf.nn.relu(tf.matmul(flattened, fc_kernel) + fc_bias)
-
-            with tf.variable_scope('dropout') as dropscope:
-                drop_rmotif = tf.nn.dropout(activation, self.keep_prob)
+                drop_rmotif = tf.nn.relu(tf.matmul(flattened, fc_kernel) + fc_bias)
+                drop_rmotif = batch_norm(drop_rmotif)
 
         with tf.variable_scope('MERGE') as scope:
             with tf.variable_scope('merge_drop') as mergescope:
@@ -194,26 +198,26 @@ class ConvNet:
                 elif int(self.config) == int(configuration.SEQ_SHAPE_GENEXPR_USUAL):
                     merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr, drop_usual])
                 elif int(self.config) == int(configuration.USUAL):
-                    merged = tf.concat(1, [drop_usual])
-                drop = tf.nn.dropout(merged, self.keep_prob)
+                    merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr, drop_usual])
+                merged = batch_norm(merged)
 
             with tf.variable_scope('fc') as fcscope:
                 if int(self.config) == int(configuration.SEQ):
-                    fc_kernel = weight_variable([100, 100])
+                    fc_kernel = weight_variable([100, 1000])
                 elif int(self.config) == int(configuration.SEQ_SHAPE):
-                    fc_kernel = weight_variable([200, 100])
+                    fc_kernel = weight_variable([200, 1000])
                 elif int(self.config) == int(configuration.SEQ_SHAPE_GENEXPR):
-                    fc_kernel = weight_variable([300, 100])
+                    fc_kernel = weight_variable([300, 1000])
                 elif int(self.config) == int(configuration.SEQ_SHAPE_GENEXPR_USUAL):
-                    fc_kernel = weight_variable([310, 100])
+                    fc_kernel = weight_variable([400, 1000])
                 elif int(self.config) == int(configuration.USUAL):
-                    fc_kernel = weight_variable([10, 100])
-                fc_bias = bias_variable([100])
-                activation = tf.nn.relu(tf.matmul(drop, fc_kernel) + fc_bias)
+                    fc_kernel = weight_variable([400, 1000])
+                fc_bias = bias_variable([1000])
+                activation = tf.nn.relu(tf.matmul(merged, fc_kernel) + fc_bias)
                 drop = tf.nn.dropout(activation, self.keep_prob)
 
             with tf.variable_scope('output') as outscope:
-                fc_kernel = weight_variable([100, 1])
+                fc_kernel = weight_variable([1000, 1])
                 fc_bias = bias_variable([1])
                 logits = tf.matmul(drop, fc_kernel) + fc_bias
 
@@ -227,7 +231,7 @@ class ConvNet:
         summary_writer = tf.train.SummaryWriter(self.model_dir + 'train')
 
         loss = calc_loss(self.logits, self.tf_train_labels)
-        optimizer = tf.train.AdamOptimizer().minimize(loss)
+        optimizer = tf.train.AdamOptimizer(0.001).minimize(loss)
 
         saver = tf.train.Saver()
 

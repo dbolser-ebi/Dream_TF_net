@@ -335,6 +335,14 @@ class DataReader:
     def get_gene_expression_tpm(self, celltypes):
         idxs = []
         features = None
+        keep_lines = []
+        with open(os.path.join(self.datapath, 'preprocess/gene_ids.data')) as fin:
+            tfs = self.get_tfs()
+            for idx, line in enumerate(fin):
+                tokens = line.split()
+                tf = 'NONE' if len(tokens) < 2 else tokens[1]
+                if tf in tfs:
+                    keep_lines.append(idx)
         for idx, celltype in enumerate(self.get_celltypes()):
             with open(os.path.join(self.datapath, 'rnaseq/gene_expression.{}.biorep1.tsv'.format(celltype))) as fin1,\
                     open(os.path.join(self.datapath, 'rnaseq/gene_expression.{}.biorep2.tsv'.format(celltype))) as fin2:
@@ -344,10 +352,14 @@ class DataReader:
                 tpm2 = []
                 fin1.readline()
                 fin2.readline()
-                for line in fin1:
+                for l_idx, line in enumerate(fin1):
+                    if l_idx not in keep_lines:
+                        continue
                     tokens = line.split()
                     tpm1.append(float(tokens[5]))
-                for line in fin2:
+                for l_idx, line in enumerate(fin2):
+                    if l_idx not in keep_lines:
+                        continue
                     tokens = line.split()
                     tpm2.append(float(tokens[5]))
 
@@ -360,10 +372,11 @@ class DataReader:
                     features = tpm1
                 else:
                     features = np.vstack((features, tpm1))
-        #shiftscaled = (features - np.mean(features, axis=0)) / (np.std(features, axis=0) + 1)
-        #return shiftscaled[idxs]
-        pca = PCA(whiten=True)
-        return pca.fit_transform(features)
+        shiftscaled = (features - np.mean(features, axis=0)) / (np.std(features, axis=0) + 1)
+        return shiftscaled[idxs]
+        #pca = PCA(whiten=True)
+        #features = pca.fit_transform(features)
+        #return features[idxs]
 
     def get_chromosomes(self):
         chromosomes =['chr7', 'chr6', 'chr5', 'chr4', 'chr3', 'chr2',
@@ -477,18 +490,12 @@ class DataReader:
             curr_chromosome = 'chr10'
             shape_features = self.get_shape_features(curr_chromosome)
 
-            f_seqfeat = conditional_open(os.path.join(self.datapath,
-                                         'preprocess/SEQUENCE_FEATURES/' + transcription_factor + '.txt'))
             celltype_names = fin.readline().split()[3:]
             idxs = []
             for i, celltype in enumerate(celltype_names):
                 if celltype in celltypes:
                     idxs.append(i)
             for lidx, line in enumerate(fin):
-                if f_seqfeat is not None:
-                    sequence_features = np.array(map(float, f_seqfeat.readline().split()), dtype=np.float32)
-                else:
-                    sequence_features = None
                 if len(position_tree) == 0 or lidx in position_tree:
                     tokens = line.split()
                     bound_states = tokens[3:]
@@ -504,11 +511,8 @@ class DataReader:
                     for i, idx in enumerate(idxs):
                         if bound_states[idx] == 'B':
                             labels[:, i] = 1
-                    yield (chromosome, start), sequence, sequence_features, \
+                    yield (chromosome, start), sequence, \
                         shape_features[start:start+self.sequence_length], labels
-
-            if f_seqfeat is not None:
-                f_seqfeat.close()
 
 if __name__ == '__main__':
     datareader = DataReader('../data/')
