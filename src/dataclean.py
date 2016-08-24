@@ -7,11 +7,18 @@ import re
 import shutil
 
 
-def make_dnase_naming_consistent(fpath):
+def make_dnase_peak_naming_consistent(fpath):
     if os.path.exists(fpath+'DNASE.IMR90.conservative.narrowPeak.gz'):
         print 'Renaming', 'DNASE.IMR90.conservative.narrowPeak.gz'
         shutil.move(fpath+'DNASE.IMR90.conservative.narrowPeak.gz',
                     fpath+'DNASE.IMR-90.conservative.narrowPeak.gz')
+
+
+def make_dnase_fold_naming_consistent(fpath):
+    if os.path.exists(os.path.join(fpath, 'DNASE.IMR90.fc.signal.bigwig')):
+        print 'Renaming', 'DNASE.IMR90.fc.signal.bigwig'
+        shutil.move(os.path.join(fpath, 'DNASE.IMR90.fc.signal.bigwig'),
+                    os.path.join(fpath, 'DNASE.IMR-90.fc.signal.bigwig'))
 
 
 def make_rnaseq_naming_consistent(fpath):
@@ -26,8 +33,9 @@ def make_rnaseq_naming_consistent(fpath):
 
 
 def make_naming_consistent(fpath):
-    make_dnase_naming_consistent(fpath+'dnase_peaks_conservative/')
-    make_rnaseq_naming_consistent(fpath+'rnaseq/')
+    make_dnase_peak_naming_consistent(os.path.join(fpath,'dnase_peaks_conservative/'))
+    make_dnase_fold_naming_consistent(os.path.join(fpath,'dnase_fold_coverage/'))
+    make_rnaseq_naming_consistent(os.path.join(fpath,'rnaseq/'))
 
 
 def clean_duplicate(num, path):

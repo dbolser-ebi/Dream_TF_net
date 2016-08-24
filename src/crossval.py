@@ -39,12 +39,12 @@ class Evaluator:
         print 'RECALL AT FDR 0.1', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.10)
         print 'RECALL AT FDR 0.05', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.05)
 
-    def write_results_to_database(self, y_test, y_pred, model, configuration, transcription_factor, dbname='results.db'):
+    def write_results_to_database(self, y_test, y_pred, model, arguments, transcription_factor, dbname='results.db'):
         conn = sqlite3.connect('../results/'+dbname)
         c = conn.cursor()
         c.execute('''
         CREATE TABLE IF NOT EXISTS results
-        (model TEXT, config INTEGER, TF TEXT, TP INTEGER, FP INTEGER, TN INTEGER, FN INTEGER,
+        (model TEXT, config TEXT, TF TEXT, TP INTEGER, FP INTEGER, TN INTEGER, FN INTEGER,
         auroc REAL, auprc REAL, rFDR5 REAL, rFDR1 REAL);
         ''')
         TP = 0
@@ -66,8 +66,8 @@ class Evaluator:
         rfdr5 = recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.50)
         rfdr1 = recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.10)
 
-        c.execute("INSERT INTO results VALUES ('%s', %d, '%s', %d, %d, %d, %d, %f, %f, %f, %f);" %
-                  (model, configuration, transcription_factor, TP, FP, TN, FN, aroc, aprc, rfdr5, rfdr1))
+        c.execute("INSERT INTO results VALUES ('%s', '%s', '%s', %d, %d, %d, %d, %f, %f, %f, %f);" %
+                  (model, arguments, transcription_factor, TP, FP, TN, FN, aroc, aprc, rfdr5, rfdr1))
         conn.commit()
         conn.close()
 
@@ -92,6 +92,13 @@ class Evaluator:
             y_train = np.zeros((num_instances,), dtype=np.int32)
         return y_train
 
+    def get_da_train(self, model, num_instances, num_celltypes):
+        if isinstance(model, ConvNet):
+            da_train = np.zeros((num_instances, num_celltypes), dtype=np.float32)
+        else:
+            da_train = None
+        return da_train
+
     def get_y_test(self, model, num_instances):
         if isinstance(model, ConvNet):
             y_test = np.zeros((num_instances,), dtype=np.float16)
@@ -99,10 +106,22 @@ class Evaluator:
             y_test = np.zeros((num_instances,), dtype=np.int32)
         return y_test
 
-    def save_model(self, transcription_factor, model, X_train, S_train, y_train, y_train_val):
+    def get_da_test(self, model, num_instances):
+        if isinstance(model, ConvNet):
+            da_test = np.zeros((num_instances,1), dtype=np.float16)
+        else:
+            da_test = None
+        return da_test
+
+    def save_model(self, transcription_factor, model, X_train, S_train, da_train, da_train_val, y_train, y_train_val):
         np.save(os.path.join(self.datapath, 'models/' + transcription_factor + model.__class__.__name__ + 'Xtrain.npy'), X_train)
         np.save(os.path.join(self.datapath, 'models/' + transcription_factor + model.__class__.__name__ + 'Strain.npy'),
                 S_train)
+        np.save(os.path.join(self.datapath, 'models/' + transcription_factor + model.__class__.__name__ + 'datrain.npy'),
+                da_train)
+        np.save(
+            os.path.join(self.datapath, 'models/' + transcription_factor + model.__class__.__name__ + 'datrain_val.npy'),
+            da_train_val)
         np.save(os.path.join(self.datapath, 'models/' + transcription_factor + model.__class__.__name__ + 'ytrain.npy'), y_train)
         np.save(os.path.join(self.datapath, 'models/' + transcription_factor + model.__class__.__name__ + 'ytrain_val.npy'), y_train_val)
 
@@ -111,11 +130,15 @@ class Evaluator:
         X_train = np.load(os.path.join(self.datapath, 'models/' + transcription_factor + model.__class__.__name__ + 'Xtrain.npy'))
         S_train = np.load(
             os.path.join(self.datapath, 'models/' + transcription_factor + model.__class__.__name__ + 'Strain.npy'))
+        da_train = np.load(
+            os.path.join(self.datapath, 'models/' + transcription_factor + model.__class__.__name__ + 'datrain.npy'))
+        da_train_val = np.load(
+            os.path.join(self.datapath, 'models/' + transcription_factor + model.__class__.__name__ + 'datrain_val.npy'))
         y_train = np.load(os.path.join(self.datapath, 'models/' + transcription_factor + model.__class__.__name__ + 'ytrain.npy'))
         y_train_val = np.load(os.path.join(self.datapath, 'models/' + transcription_factor + model.__class__.__name__ + 'ytrain_val.npy'))
-        return X_train, S_train, y_train, y_train_val
+        return X_train, S_train, da_train, da_train_val, y_train, y_train_val
 
-    def get_X_data(self, model, sequence, sequence_features=None):
+    def get_X_data(self, model, sequence):
         if isinstance(model, ConvNet):
             return self.datareader.sequence_to_one_hot(np.array(list(sequence)))
         else:
@@ -134,11 +157,23 @@ class Evaluator:
         else:
             return np.max(labels.flatten()[:-1])
 
+    def get_da_train_data(self, model, labels):
+        if isinstance(model, ConvNet):
+            return labels[:, :-1]
+        else:
+            return None
+
     def get_y_test_data(self, model, labels):
         if isinstance(model, ConvNet):
             return labels
         else:
             return np.max(labels)
+
+    def get_da_test_data(self, model, labels):
+        if isinstance(model, ConvNet):
+            return labels
+        else:
+            return None
 
     def make_test_predictions(self):
         tf_final = {
@@ -157,7 +192,7 @@ class Evaluator:
             'TAF1': ['liver']
         }
 
-    def make_ladder_predictions(self, model, transcription_factor):
+    def make_ladder_predictions(self, model, transcription_factor, unbound_fraction=1):
         tf_leaderboard = {
             'ARID3A': ['K562'],
             'ATF2': ['K562'],
@@ -197,11 +232,12 @@ class Evaluator:
 
             for idx, instance in enumerate(self.datareader.generate_cross_celltype(transcription_factor,
                                                                                    celltypes,
-                                                                                   [CrossvalOptions.balance_peaks])):
+                                                                                   [CrossvalOptions.balance_peaks],
+                                                                                   unbound_fraction=unbound_fraction)):
                 if idx >= self.num_train_instances:
                     break
-                (_, _), sequence, sequence_features, labels = instance
-                X_train[idx] = self.get_X_data(model, sequence, sequence_features)
+                (_, _), sequence, labels = instance
+                X_train[idx] = self.get_X_data(model, sequence)
                 y_train[idx] = self.get_y_test_data(model, labels)
             model.fit(X_train, y_train)
 
@@ -237,7 +273,7 @@ class Evaluator:
                     for idx, line in enumerate(fin):
                         print>>fout, str(line.strip())+'\t'+str(y_test[idx])
 
-    def run_cross_cell_benchmark(self, model, transcription_factor, save_train_set=False):
+    def run_cross_cell_benchmark(self, model, transcription_factor, save_train_set=False, unbound_fraction=1, arguments=""):
         '''
         Run cross celltype benchmark for specified model and model_parameters
         :param datapath: path to data directory
@@ -247,42 +283,40 @@ class Evaluator:
         print "Running cross celltype benchmark for transcription factor %s" % transcription_factor
         #--------------- TRAIN
         celltypes = self.datareader.get_celltypes_for_tf(transcription_factor)
-
-
-        self.num_train_instances = self.datareader.get_num_bound_lines(transcription_factor)*2
-        if len(celltypes) <= 1:
-            print 'cant build cross transcription_factor validation for this transcription factor'
-            return
+        self.num_train_instances = self.datareader.get_num_bound_lines(transcription_factor)*(1+unbound_fraction)
 
         celltypes_train = celltypes[:-1]
         celltypes_test = celltypes[-1]
 
         if os.path.exists(os.path.join(self.datapath, 'models/'+transcription_factor+model.__class__.__name__+'Xtrain.npy')):
-            X_train, S_train, y_train, y_train_val = self.load_model(transcription_factor, model)
+            X_train, S_train, da_train, da_train_val, y_train, y_train_val = self.load_model(transcription_factor, model)
         else:
             y_train_val = np.zeros((self.num_train_instances,), dtype=np.int32)
             X_train = self.get_X(model, self.num_train_instances)
             S_train = self.get_S(model, self.num_train_instances)
             y_train = self.get_y_train(model, self.num_train_instances, len(celltypes_train))
+            da_train = self.get_da_train(model, self.num_test_instances, len(celltypes_train))
+            da_train_val = np.zeros((self.num_train_instances, 1), dtype=np.float32)
 
             for idx, instance in enumerate(self.datareader.generate_cross_celltype(transcription_factor,
                                            celltypes,
-                                           [CrossvalOptions.balance_peaks])):
-                if idx >= self.num_train_instances:
-                    break
-                (_, _), sequence, shape_features, labels = instance
+                                           [CrossvalOptions.balance_peaks], unbound_fraction=unbound_fraction)):
+                (_, _), sequence, shape_features, dnase_labels, labels = instance
                 X_train[idx] = self.get_X_data(model, sequence)
                 S_train[idx] = self.get_S_data(model, shape_features)
+                da_train[idx] = self.get_da_train_data(model, dnase_labels)
+                da_train_val[idx] = dnase_labels[:, -1]
                 y_train[idx] = self.get_y_train_data(model, labels)
                 y_train_val[idx] = labels.flatten()[-1]
 
         if save_train_set:
-            self.save_model(transcription_factor, model, X_train, S_train, y_train, y_train_val)
+            self.save_model(transcription_factor, model, X_train, S_train, da_train, da_train_val, y_train, y_train_val)
 
         gene_expression_features = self.datareader.get_gene_expression_tpm(celltypes_train)
-        model.fit(X_train, y_train, S_train, gene_expression_features)
+        model.fit(X_train, y_train, S_train, gene_expression_features, da_train)
+
         gene_expression_features = self.datareader.get_gene_expression_tpm(celltypes_test)
-        predictions = model.predict(X_train, S_train, gene_expression_features)
+        predictions = model.predict(X_train, S_train, gene_expression_features, np.zeros((da_train.shape[0], 1), dtype=np.float32))
 
         print 'TRAINING COMPLETED'
         self.print_results(y_train_val, predictions)
@@ -290,6 +324,9 @@ class Evaluator:
         # free up memory
         del X_train
         del y_train
+        del S_train
+        del y_train_val
+        del da_train
 
         # --------------- VALIDATION
         print
@@ -299,6 +336,8 @@ class Evaluator:
 
         y_test = None
         X_test = None
+        S_test = None
+        da_test = None
         idx = 0
 
         tot_num_test_instances = reduce(lambda x, y: self.datareader.get_num_instances(y)+x, test_chromosomes, 0)
@@ -312,19 +351,20 @@ class Evaluator:
 
         for instance in self.datareader.generate_cross_celltype(transcription_factor,
                                                                 [celltypes_test]):
-            (chromosome, start), sequence, shape_features, label = instance
+            (chromosome, start), sequence, shape_features, dnase_labels, label = instance
             if curr_chr == '-1' and chromosome in test_chromosomes:
                 curr_chr = chromosome
                 self.num_test_instances = self.datareader.get_num_instances(chromosome)
                 X_test = self.get_X(model, self.num_test_instances)
                 S_test = self.get_S(model, self.num_test_instances)
                 y_test = self.get_y_test(model, self.num_test_instances)
+                da_test = self.get_da_test(model, self.num_test_instances)
                 idx = 0
 
             elif curr_chr != chromosome and chromosome in test_chromosomes:
                 print 'Results for test', curr_chr
                 print 'num test instances', self.num_test_instances
-                y_pred = model.predict(X_test, S_test, gene_expression_features)
+                y_pred = model.predict(X_test, S_test, gene_expression_features, da_test)
                 self.print_results(y_test, y_pred)
                 y_tot_test[t_idx:t_idx + self.num_test_instances] = y_test
                 y_tot_pred[t_idx:t_idx + self.num_test_instances] = y_pred
@@ -335,12 +375,13 @@ class Evaluator:
                 X_test = self.get_X(model, self.num_test_instances)
                 S_test = self.get_S(model, self.num_test_instances)
                 y_test = self.get_y_test(model, self.num_test_instances)
+                da_test = self.get_da_test(model, self.num_test_instances)
                 idx = 0
 
             elif curr_chr != '-1' and curr_chr != chromosome:
                 print 'Results for test', curr_chr
                 print 'num test instances', self.num_test_instances
-                y_pred = model.predict(X_test, S_test, gene_expression_features)
+                y_pred = model.predict(X_test, S_test, gene_expression_features, da_test)
 
                 self.print_results(y_test, y_pred)
                 y_tot_test[t_idx:t_idx+self.num_test_instances] = y_test
@@ -353,12 +394,13 @@ class Evaluator:
                 y_test[idx] = label
                 X_test[idx] = self.get_X_data(model, sequence)
                 S_test[idx] = self.get_S_data(model, shape_features)
+                da_test[idx] = dnase_labels
                 idx += 1
 
         print "Overall test results"
         self.print_results(y_tot_test, y_tot_pred)
         self.write_results_to_database(y_tot_test, y_tot_pred, model.__class__.__name__,
-                                       model.get_config(), transcription_factor)
+                                       arguments, transcription_factor)
 
 
 if __name__ == '__main__':
@@ -368,24 +410,31 @@ if __name__ == '__main__':
     parser.add_argument('--validate', '-v', action='store_true', help='run cross TF validation benchmark', required=False)
     parser.add_argument('--predict', '-p', action='store_true', help='predict TF ladderboard', required=False)
     parser.add_argument('--config', '-c', help='configuration of model', required=False)
+    parser.add_argument('--unbound_fraction', '-uf', help='unbound fraction in training', required=False)
     args = parser.parse_args()
-
     model = None
 
     if args.model == 'TFC':
-        model = ConvNet('../log/', num_epochs=20, batch_size=512,
-                        num_gen_expr_features=32, config=args.config, dropout_rate=0.25, transcription_factor=args.transcription_factor)
+        model = ConvNet('../log/', num_epochs=1, batch_size=512,
+                        num_gen_expr_features=32, config=int(args.config), dropout_rate=0.25,
+                        transcription_factor=args.transcription_factor, eval_size=0.2)
     elif args.model == 'THC':
         from theanonet import *
         model = DNNClassifier(200, 4, 0.2, [100], [0.5], verbose=True, max_epochs=100, batch_size=512)
 
     else:
-        print "Model options: TFC (TensorFlow Convnet), THC (Theano Convnet), RF (Random Forest)"
+        print "Model options: TFC (TensorFlow Convnet), THC (Theano Convnet)"
+
+    unbound_fraction = 1
+
+    if args.unbound_fraction is not None:
+        unbound_fraction = int(args.unbound_fraction)
 
     if model is not None:
         transcription_factor = args.transcription_factor
         evaluator = Evaluator('../data/')
         if args.validate:
-            evaluator.run_cross_cell_benchmark(model, transcription_factor, save_train_set=True)
+            evaluator.run_cross_cell_benchmark(model, transcription_factor, save_train_set=True,
+                                               unbound_fraction=unbound_fraction, arguments=str(vars(args)))
         if args.predict:
-            evaluator.make_ladder_predictions(model, transcription_factor)
+            evaluator.make_ladder_predictions(model, transcription_factor, unbound_fraction=unbound_fraction)

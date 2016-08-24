@@ -44,8 +44,6 @@ def get_num_bound_lines():
             bound[transcription_factor] = len(bound_lines)
     print bound
 
-
-
 if __name__ == '__main__':
     #print print_num_instances_for_each_chromosome()
     #read_structure_features()

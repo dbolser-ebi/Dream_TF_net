@@ -7,6 +7,7 @@ import math
 import random
 import warnings
 from sklearn.decomposition import PCA
+import bisect
 
 
 def optional_gzip_open(fname):
@@ -436,7 +437,26 @@ class DataReader:
                     out.extend(line.strip().split(','))
             return map(replaceNA, out)
 
-    def generate_cross_celltype(self, transcription_factor, celltypes, options=[]):
+    def get_DNAse_conservative_peak_lists(self, celltypes):
+        dnase_files = []
+        dnase_lists = []
+        for celltype in celltypes:
+            dnase_files.append(gzip.open(os.path.join(self.datapath,
+                                                 'dnase_peaks_conservative/DNASE.{}.conservative.narrowPeak.gz'.format(
+                                                     celltype))))
+        for f_handler in dnase_files:
+            l = []
+            for line in f_handler:
+                tokens = line.split()
+                chromosome = tokens[0]
+                start = int(tokens[1])
+                stop = int(tokens[2])
+                l.append((chromosome, start, stop))
+            l.sort()
+            dnase_lists.append(l)
+        return dnase_lists
+
+    def generate_cross_celltype(self, transcription_factor, celltypes, options=[], unbound_fraction=1):
         position_tree = set()  # keeps track of which lines (chr, start) to include
 
         if CrossvalOptions.filter_on_DNase_peaks in options:
@@ -476,7 +496,8 @@ class DataReader:
                     else:
                         unbound_lines.append(line_idx)
                 random.shuffle(unbound_lines)
-                bound_lines.extend(unbound_lines[:len(bound_lines)])
+                if unbound_fraction > 0:
+                    bound_lines.extend(unbound_lines[:min(len(bound_lines)*unbound_fraction, len(unbound_lines))])
                 position_tree.update(set(bound_lines))
 
         elif CrossvalOptions.random_shuffle_10_percent in options:
@@ -487,6 +508,8 @@ class DataReader:
                 position_tree.update(a[:int(0.1*len(a))])
 
         with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+            dnase_lists = self.get_DNAse_conservative_peak_lists(celltypes)
+
             curr_chromosome = 'chr10'
             shape_features = self.get_shape_features(curr_chromosome)
 
@@ -495,14 +518,28 @@ class DataReader:
             for i, celltype in enumerate(celltype_names):
                 if celltype in celltypes:
                     idxs.append(i)
-            for lidx, line in enumerate(fin):
-                if len(position_tree) == 0 or lidx in position_tree:
+            for l_idx, line in enumerate(fin):
+                if len(position_tree) == 0 or l_idx in position_tree:
                     tokens = line.split()
                     bound_states = tokens[3:]
                     start = int(tokens[1])
                     chromosome = tokens[0]
                     sequence = self.hg19[chromosome][start:start + self.sequence_length]
                     labels = np.zeros((1, len(celltypes)), dtype=np.float32)
+
+                    # find position in dnase on the left in sorted order
+                    dnase_labels = np.zeros((1, len(celltypes)), dtype=np.float32)
+                    for c_idx, celltype in enumerate(celltypes):
+                        dnase_pos = bisect.bisect_left(dnase_lists[c_idx], (chromosome, start, start+200))
+                        # check left
+                        dnase_chr, dnase_start, dnase_end = dnase_lists[c_idx][dnase_pos]
+                        if dnase_start <= start+200 and start <= dnase_end:
+                            dnase_labels[:, c_idx] = 1
+                        # check right
+                        dnase_chr, dnase_start, dnase_end = dnase_lists[c_idx][dnase_pos+1]
+                        if dnase_start <= start + 200 and start <= dnase_end:
+                            dnase_labels[:, c_idx] = 1
+
 
                     if chromosome != curr_chromosome:
                         curr_chromosome = chromosome
@@ -511,10 +548,12 @@ class DataReader:
                     for i, idx in enumerate(idxs):
                         if bound_states[idx] == 'B':
                             labels[:, i] = 1
-                    yield (chromosome, start), sequence, \
-                        shape_features[start:start+self.sequence_length], labels
+                    yield (chromosome, start), sequence, shape_features[start:start+self.sequence_length], dnase_labels, labels
 
 if __name__ == '__main__':
     datareader = DataReader('../data/')
-    features = datareader.get_gene_expression_tpm(['MCF-7', 'liver'])
-    print features.shape
+    l = datareader.get_DNAse_conservative_peak_lists(['MCF-7'])[0]
+    print len(l)
+    pos = bisect.bisect_left(l, ('chr10', 100000, 100200))
+    print l[pos]
+    print l[pos+1]
