@@ -295,7 +295,7 @@ class Evaluator:
             X_train = self.get_X(model, self.num_train_instances)
             S_train = self.get_S(model, self.num_train_instances)
             y_train = self.get_y_train(model, self.num_train_instances, len(celltypes_train))
-            da_train = self.get_da_train(model, self.num_test_instances, len(celltypes_train))
+            da_train = self.get_da_train(model, self.num_train_instances, len(celltypes_train))
             da_train_val = np.zeros((self.num_train_instances, 1), dtype=np.float32)
 
             for idx, instance in enumerate(self.datareader.generate_cross_celltype(transcription_factor,
@@ -320,6 +320,7 @@ class Evaluator:
 
         print 'TRAINING COMPLETED'
         self.print_results(y_train_val, predictions)
+
 
         # free up memory
         del X_train
@@ -411,11 +412,14 @@ if __name__ == '__main__':
     parser.add_argument('--predict', '-p', action='store_true', help='predict TF ladderboard', required=False)
     parser.add_argument('--config', '-c', help='configuration of model', required=False)
     parser.add_argument('--unbound_fraction', '-uf', help='unbound fraction in training', required=False)
+    parser.add_argument('--num_epochs', '-ne', help='number of epochs', required=False)
     args = parser.parse_args()
     model = None
 
+    num_epochs = 1 if args.num_epochs is None else int(args.num_epochs)
+
     if args.model == 'TFC':
-        model = ConvNet('../log/', num_epochs=1, batch_size=512,
+        model = ConvNet('../log/', num_epochs=num_epochs, batch_size=512,
                         num_gen_expr_features=32, config=int(args.config), dropout_rate=0.25,
                         transcription_factor=args.transcription_factor, eval_size=0.2)
     elif args.model == 'THC':

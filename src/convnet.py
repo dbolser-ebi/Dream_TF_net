@@ -4,6 +4,7 @@ from sklearn.cross_validation import StratifiedKFold
 import time
 from datareader import DataReader
 from tensorflow.contrib.layers.python.layers import *
+from tensorflow.contrib.layers.python.layers.utils import *
 
 
 class configuration():
@@ -119,7 +120,7 @@ class ConvNet:
                     with tf.variable_scope(transcription_factor) as tfscope:
                         for idx, motif in enumerate(motifs):
                             pssm = self.datareader.calc_pssm(motif)
-                            conv_kernel = tf.get_variable('motif_%d' % idx, shape=(1, pssm.shape[0], pssm.shape[1], 1), dtype=tf.float32,
+                            usual_conv_kernel = tf.get_variable('motif_%d' % idx, shape=(1, pssm.shape[0], pssm.shape[1], 1), dtype=tf.float32,
                                                           initializer=tf.constant_initializer(
                                                               pssm
                             ), trainable=False)
@@ -127,7 +128,7 @@ class ConvNet:
                             width = pssm.shape[0]
                             conv_biases = tf.zeros(shape=[depth])
                             stride = 1
-                            conv = conv1D(self.tf_sequence, conv_kernel, strides=[1, 1, stride, 1])
+                            conv = conv1D(self.tf_sequence, usual_conv_kernel, strides=[1, 1, stride, 1])
                             num_nodes = (self.width - width) / stride + 1
                             denominator = 4
                             for div in range(4, 10):
@@ -150,9 +151,9 @@ class ConvNet:
             with tf.variable_scope('conv15_10') as convscope:
                 depth = 10
                 width = 15
-                conv_kernel = weight_variable(shape=[self.height, width, self.num_shape_features, depth])
+                shape_conv_kernel = weight_variable(shape=[self.height, width, self.num_shape_features, depth])
                 conv_biases = weight_variable(shape=[depth])
-                conv = conv1D(self.tf_shape, conv_kernel)
+                conv = conv1D(self.tf_shape, shape_conv_kernel)
                 activation = tf.nn.bias_add(conv, conv_biases)
 
             with tf.variable_scope('pool35') as poolscope:
@@ -169,9 +170,10 @@ class ConvNet:
             with tf.variable_scope('conv15_15') as convscope:
                 depth = 30
                 width = 15
-                conv_kernel = weight_variable(shape=[self.height, width, self.num_channels, depth])
+                rmotif_conv_kernel = weight_variable(shape=[self.height, width, self.num_channels, depth])
+
                 conv_biases = weight_variable(shape=[depth])
-                conv = conv1D(self.tf_sequence, conv_kernel)
+                conv = conv1D(self.tf_sequence, rmotif_conv_kernel)
                 activation = tf.nn.bias_add(conv, conv_biases)
 
             with tf.variable_scope('pool35') as poolscope:
@@ -204,12 +206,11 @@ class ConvNet:
                 drop = tf.nn.dropout(activation, self.keep_prob)
 
             with tf.variable_scope('output') as outscope:
-                fc_kernel = weight_variable([1000, 1])
-                fc_bias = bias_variable([1])
-                logits = tf.matmul(drop, fc_kernel) + fc_bias
+                logits = fully_connected(drop, 1, None, variables_collections='test')
 
         # TENSORBOARD SUMMARY INFO
-        conv_kernel_h = tf.histogram_summary('convkernel histogram', conv_kernel)
+        conv_kernel_h = tf.histogram_summary('usual histogram', usual_conv_kernel)
+        conv_kernel_h2 = tf.histogram_summary('rmotif histogram', rmotif_conv_kernel)
         merged_summary = tf.merge_all_summaries()
 
         return logits, merged_summary
@@ -278,6 +279,7 @@ class ConvNet:
                                      self.keep_prob: 1-self.dropout_rate,
                                      self.tf_dnase_accesible: batch_dnase_labels
                                      }
+                        '''
                         if np.random.rand() <= 0.9 or celltype_idx != 0:
                             _, r_loss = session.run([optimizer, loss], feed_dict=feed_dict)
                         else:
@@ -291,7 +293,10 @@ class ConvNet:
                             if self.model_dir is not None:
                                 summary_writer.add_summary(summary)
                                 summary_writer.add_run_metadata(run_metadata, 'Epoch %d, offset %d' % (epoch, offset))
-
+                        '''
+                        summary, _, r_loss = session.run([self.summary_op, optimizer, loss], feed_dict=feed_dict)
+                        if self.model_dir is not None:
+                            summary_writer.add_summary(summary)
                         losses.append(r_loss)
                 losses = np.array(losses)
                 t_loss = np.mean(losses)

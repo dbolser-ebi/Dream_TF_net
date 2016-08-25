@@ -423,10 +423,13 @@ class DataReader:
             else:
                 return x
 
-        with open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.MGW')) as fin:
+        with open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.MGW')) as fmgw,\
+            open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.HelT')) as fhelt,\
+            open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.Roll')) as froll,\
+            open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.ProT')) as fprot:
             out = []
             skip = True
-            for line in fin:
+            for line in fmgw:
                 if line.startswith('>'+chromosome):
                     skip = False
                 elif skip:
@@ -532,14 +535,15 @@ class DataReader:
                     for c_idx, celltype in enumerate(celltypes):
                         dnase_pos = bisect.bisect_left(dnase_lists[c_idx], (chromosome, start, start+200))
                         # check left
-                        dnase_chr, dnase_start, dnase_end = dnase_lists[c_idx][dnase_pos]
-                        if dnase_start <= start+200 and start <= dnase_end:
-                            dnase_labels[:, c_idx] = 1
+                        if dnase_pos < len(dnase_lists[c_idx]):
+                            dnase_chr, dnase_start, dnase_end = dnase_lists[c_idx][dnase_pos]
+                            if dnase_start <= start+200 and start <= dnase_end:
+                                dnase_labels[:, c_idx] = 1
                         # check right
-                        dnase_chr, dnase_start, dnase_end = dnase_lists[c_idx][dnase_pos+1]
-                        if dnase_start <= start + 200 and start <= dnase_end:
-                            dnase_labels[:, c_idx] = 1
-
+                        if dnase_pos + 1 < len(dnase_lists[c_idx]):
+                            dnase_chr, dnase_start, dnase_end = dnase_lists[c_idx][dnase_pos+1]
+                            if dnase_start <= start + 200 and start <= dnase_end:
+                                dnase_labels[:, c_idx] = 1
 
                     if chromosome != curr_chromosome:
                         curr_chromosome = chromosome
