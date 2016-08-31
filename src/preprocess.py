@@ -29,7 +29,7 @@ def read_structure_features():
             break
     '''
 
-def get_num_bound_lines():
+def get_num_bound_lines(amb_as_bound =False):
     reader = DataReader('../data/')
     bound = {}
     for transcription_factor in reader.get_tfs():
@@ -38,7 +38,7 @@ def get_num_bound_lines():
             bound_lines = []
             # only the train set
             for line_idx, line in enumerate(fin):
-                if 'B' in line:
+                if 'B' in line or (amb_as_bound and 'A' in line):
                     bound_lines.append(line_idx)
             print transcription_factor, "num bound lines", len(bound_lines)
             bound[transcription_factor] = len(bound_lines)
@@ -47,4 +47,4 @@ def get_num_bound_lines():
 if __name__ == '__main__':
     #print print_num_instances_for_each_chromosome()
     #read_structure_features()
-    get_num_bound_lines()
+    get_num_bound_lines(True)

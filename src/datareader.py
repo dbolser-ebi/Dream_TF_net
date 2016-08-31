@@ -324,8 +324,17 @@ class DataReader:
 
         return reduce(calculate_instances, dna_peaks, 0)
 
-    def get_num_bound_lines(self, transcription_factor):
-        mp = {'YY1': 414733, 'JUND': 734552, 'MAFK': 442379, 'TEAD4': 576098, 'CEBPB': 984566, 'ZNF143': 312498,
+    def get_num_bound_lines(self, transcription_factor, ambiguous_as_bound=False):
+        if ambiguous_as_bound:
+            mp = {'YY1': 3108428, 'JUND': 3818996, 'MAFK': 2549072, 'TEAD4': 3861733, 'CEBPB': 4625934,
+                  'ZNF143': 1843626, 'SPI1': 832029, 'NANOG': 448269, 'EGR1': 2082234, 'GATA3': 2237461,
+                  'MYC': 2502483, 'SRF': 2021623, 'REST': 2828169, 'CREB1': 3056214, 'STAT3': 676551,
+                  'EP300': 3783998, 'ATF7': 3609714, 'ARID3A': 786946, 'E2F6': 2382647, 'E2F1': 1437776,
+                  'TAF1': 2269991, 'RFX5': 2219658, 'MAX': 5691432, 'HNF4A': 496317, 'TCF7L2': 2271997,
+                  'FOXA1': 1083820, 'FOXA2': 1581858, 'ATF3': 2814860, 'TCF12': 2875805, 'GABPA': 3469748,
+                  'CTCF': 2083719, 'ATF2': 3275622}
+        else:
+            mp = {'YY1': 414733, 'JUND': 734552, 'MAFK': 442379, 'TEAD4': 576098, 'CEBPB': 984566, 'ZNF143': 312498,
          'SPI1': 200845, 'NANOG': 32918, 'EGR1': 267537, 'GATA3': 496617, 'MYC': 347756, 'SRF': 229617, 'REST': 255624,
          'CREB1': 391070, 'STAT3': 108787, 'EP300': 789926, 'ATF7': 732843, 'ARID3A': 132702, 'E2F6': 303125,
          'E2F1': 127319, 'TAF1': 342390, 'RFX5': 237118, 'MAX': 1115468, 'HNF4A': 106308, 'TCF7L2': 322078,
@@ -446,7 +455,7 @@ class DataReader:
             outroll = get_features(froll, True)
             outprot = get_features(fprot, False)
 
-            features = np.array([outmgw, outhelt, outroll, outprot]).transpose()
+            features = np.array([outmgw, outhelt, outroll, outprot], dtype=np.float32).transpose()
             np.save(savepath, features)
 
             return features

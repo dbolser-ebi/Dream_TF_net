@@ -314,7 +314,12 @@ class Evaluator:
                         else:
                             y_test = np.hstack((y_test, prediction))
                 fin.seek(0)
-                with gzip.open('../results/'+'L.'+transcription_factor+'.'+test_celltype+'.tab.gz', 'w') as fout:
+                if leaderboard:
+                    f_out_name = '../results/'+'L.'+transcription_factor+'.'+test_celltype+'.tab.gz'
+                else:
+                    f_out_name = '../results/' + 'F.' + transcription_factor + '.' + test_celltype + '.tab.gz'
+
+                with gzip.open(f_out_name, 'w') as fout:
                     for idx, line in enumerate(fin):
                         print>>fout, str(line.strip())+'\t'+str(y_test[idx])
 
