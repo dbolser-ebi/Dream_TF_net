@@ -4,7 +4,6 @@ from sklearn.cross_validation import StratifiedKFold
 import time
 from datareader import DataReader
 from tensorflow.contrib.layers.python.layers import *
-from tensorflow.contrib.layers.python.layers.utils import *
 
 
 class configuration():
@@ -75,9 +74,9 @@ class ConvNet:
     def __init__(self, model_dir, batch_size=256, num_channels=4, num_epochs=2,
                  width=200, num_outputs=1, eval_size=0.2, early_stopping=100,
                  num_gen_expr_features=57820, num_shape_features=1, dropout_rate=.5,
-                 config=configuration.SEQ, verbose=True, datapath ='../data/', transcription_factor='CTCF'):
+                 config=1, verbose=True, datapath ='../data/', transcription_factor='CTCF'):
         if config is None:
-            config = configuration.SEQ
+            config = 1
         self.datareader = DataReader(datapath)
         self.config = config
         self.num_outputs = num_outputs
@@ -121,9 +120,7 @@ class ConvNet:
                         for idx, motif in enumerate(motifs):
                             pssm = self.datareader.calc_pssm(motif)
                             usual_conv_kernel = tf.get_variable('motif_%d' % idx, shape=(1, pssm.shape[0], pssm.shape[1], 1), dtype=tf.float32,
-                                                          initializer=tf.constant_initializer(
-                                                              pssm
-                            ), trainable=False)
+                                                                initializer=tf.constant_initializer(pssm))
                             depth = 1
                             width = pssm.shape[0]
                             conv_biases = tf.zeros(shape=[depth])
@@ -333,7 +330,7 @@ class ConvNet:
                 early_score = self.early_stopping.update(v_loss)
                 if early_score == 2:
                     # Use the best model on validation
-                    saver.save(session, self.model_dir + 'conv.ckpt')
+                    saver.save(session, self.model_dir + 'conv%s%d.ckpt' % (self.transcription_factor, self.config))
                     if self.verbose:
                         print (bcolors.OKCYAN+"%d\t%f\t%f\t%.2f%%\t\t%ds"+bcolors.ENDC) % \
                               (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
@@ -358,7 +355,7 @@ class ConvNet:
         saver = tf.train.Saver()
         predictions = []
         with tf.Session() as session:
-            saver.restore(session, self.model_dir+'conv.ckpt')
+            saver.restore(session, self.model_dir+'conv%s%d.ckpt' % (self.transcription_factor, self.config))
             for offset in xrange(0, num_examples, self.batch_size):
                 end = min(offset + self.batch_size, num_examples)
                 offset_ = offset - (self.batch_size-(end-offset))

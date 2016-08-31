@@ -4,6 +4,8 @@ from datareader import *
 from wiggleReader import get_wiggle_output, wiggleToBedGraph, split_iter
 import argparse
 import os
+import tensorflow as tf
+from tensorflow.contrib.layers.python.layers import *
 
 
 class MotifProcessor:
@@ -133,11 +135,68 @@ class MotifProcessor:
                         print>> fout, e,
                     print>>fout
 
+
+def preprocess_scores():
+    datareader = DataReader('../data/')
+    monodir = '../data/preprocess/autosome/mono_pwm'
+    didir = '../data/preprocess/autosome/di_pwm'
+    pssms = []
+
+    batch_size = 64
+    height = 1
+    sequence_width = 200
+    num_channels = 4
+
+    for f_mono in os.listdir(monodir):
+        pssm = np.loadtxt(os.path.join(monodir, f_mono), dtype=np.float32, skiprows=1)
+        pssms.append((f_mono, pssm))
+    for f_di in os.listdir(didir):
+        pssm = np.loadtxt(os.path.join(didir, f_di), dtype=np.float32, skiprows=1)
+        pssms.append((f_di, pssm))
+
+    tf_sequence = tf.placeholder(tf.float32, shape=(batch_size, height,
+                                          sequence_width, num_channels), name='sequences')
+
+
+
+    def get_model():
+        def conv1D(x, W, strides=[1, 1, 1, 1]):
+            return tf.nn.conv2d(x, W, strides=strides, padding='VALID')
+
+        def max_pool_1xn(x, width):
+            return tf.nn.max_pool(x, ksize=[1, 1, width, 1],
+                                  strides=[1, 1, width, 1], padding='VALID')
+
+        with tf.variable_scope('USUAL_SUSPECTS') as scope:
+            activations = []
+            for entry in pssms:
+                name = entry[0]
+                pssm = entry[1]
+                usual_conv_kernel = tf.get_variable(name, shape=(1, pssm.shape[0], pssm.shape[1], 1), dtype=tf.float32,
+                                                    initializer=tf.constant_initializer(pssm), trainable=False)
+                depth = 1
+                pssm_width = pssm.shape[0]
+                stride = 1
+                activation = conv1D(tf_sequence, usual_conv_kernel, strides=[1, 1, stride, 1])
+                num_nodes = (sequence_width - pssm_width) / stride + 1
+                denominator = 4
+                for div in range(4, 10):
+                    if num_nodes % div == 0:
+                        denominator = div
+                        break
+                pooled = tf.nn.relu(max_pool_1xn(activation, num_nodes/denominator))
+                activations.append(flatten(pooled))
+            return activations
+
+    hg19 = Fasta('../data/annotations/hg19.genome.fa')
+    with gzip.open('../data/annotations/train_regions.blacklistfiltered.bed.gz') as fin:
+        sequences = []
+        for line in fin:
+            tokens = line.split()
+            chromosmoe = tokens[0]
+            start = int(tokens[1])
+            end = int(tokens[2])
+            sequences.append()
+
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--tf', help='transcription factor', required=True)
-    args = parser.parse_args()
-    mp = MotifProcessor('../data/')
-    mp.featurize_sequence(transcription_factor=args.tf)
-
-
+    preprocess_scores()

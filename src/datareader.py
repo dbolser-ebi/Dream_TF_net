@@ -417,28 +417,57 @@ class DataReader:
         return np.log2(norm_pwm / 0.25)
 
     def get_shape_features(self, chromosome):
-        def replaceNA(x):
-            if x == 'NA':
-                return 0
-            else:
-                return x
 
         with open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.MGW')) as fmgw,\
-            open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.HelT')) as fhelt,\
-            open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.Roll')) as froll,\
-            open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.ProT')) as fprot:
-            out = []
+             open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.HelT')) as fhelt,\
+             open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.Roll')) as froll,\
+             open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.ProT')) as fprot:
+            '''
+            outmgw = []
+            outhelt = [0]
+            outroll = [0]
+            outprot = []
+
+
             skip = True
-            for line in fmgw:
-                if line.startswith('>'+chromosome):
+            '''
+
+            def get_features(f_handler, add_zero):
+                out = [0] if add_zero else []
+                skip = True
+                for line in f_handler:
+                    if line.strip() == '>' + chromosome:
+                        skip = False
+                    elif skip:
+                        continue
+                    elif line.startswith('>chr'):
+                        break
+                    else:
+                        out.extend(map(float, line.strip().replace('NA', '0').split(',')))
+                return out
+            '''
+            for l_mgw in fmgw:
+                l_helt = fhelt.next()
+                l_roll = froll.next()
+                l_prot = fprot.next()
+                if l_mgw.strip() == '>'+chromosome:
                     skip = False
                 elif skip:
                     continue
-                elif line.startswith('>chr'):
+                elif l_mgw.startswith('>chr'):
                     break
                 else:
-                    out.extend(line.strip().split(','))
-            return map(replaceNA, out)
+                    outmgw.extend(map(float, l_mgw.strip().replace('NA', '0').split(',')))
+                    outhelt.extend(map(float, l_helt.strip().replace('NA', '0').split(',')))
+                    outroll.extend(map(float, l_roll.strip().replace('NA', '0').split(',')))
+                    outprot.extend(map(float, l_prot.strip().replace('NA', '0').split(',')))
+            '''
+            outmgw = get_features(fmgw, False)
+            outhelt = get_features(fhelt, True)
+            outroll = get_features(froll, True)
+            outprot = get_features(fprot, False)
+
+            return np.array([outmgw, outhelt, outroll, outprot]).transpose()
 
     def get_DNAse_conservative_peak_lists(self, celltypes):
         dnase_files = []
@@ -500,7 +529,7 @@ class DataReader:
                         unbound_lines.append(line_idx)
                 random.shuffle(unbound_lines)
                 if unbound_fraction > 0:
-                    bound_lines.extend(unbound_lines[:min(len(bound_lines)*unbound_fraction, len(unbound_lines))])
+                    bound_lines.extend(unbound_lines[:int(min(len(bound_lines)*unbound_fraction, len(unbound_lines)))])
                 position_tree.update(set(bound_lines))
 
         elif CrossvalOptions.random_shuffle_10_percent in options:
@@ -547,17 +576,18 @@ class DataReader:
 
                     if chromosome != curr_chromosome:
                         curr_chromosome = chromosome
-                        shape_features = self.get_shape_features(chromosome)
+                        shape_features = self.get_shape_features(curr_chromosome)
 
                     for i, idx in enumerate(idxs):
                         if bound_states[idx] == 'B':
                             labels[:, i] = 1
-                    yield (chromosome, start), sequence, shape_features[start:start+self.sequence_length], dnase_labels, labels
+                    #if shape_features[start:start+self.sequence_length].size < 200:
+                    #    print chromosome, start, sequence, shape_features.shape[0]
+                    yield (chromosome, start), sequence, shape_features[start:start+self.sequence_length], \
+                        dnase_labels, labels
 
 if __name__ == '__main__':
     datareader = DataReader('../data/')
-    l = datareader.get_DNAse_conservative_peak_lists(['MCF-7'])[0]
-    print len(l)
-    pos = bisect.bisect_left(l, ('chr10', 100000, 100200))
-    print l[pos]
-    print l[pos+1]
+    out = datareader.get_shape_features('chr10')
+    print out.shape
+
