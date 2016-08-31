@@ -178,24 +178,7 @@ class Evaluator:
         else:
             return None
 
-    def make_test_predictions(self):
-        tf_final = {
-            'ATF2': ['HEPG2'],
-            'CTCF': ['PC-3', 'induced_pluripotent_stem_cell'],
-            'E2F1': ['K562'],
-            'EGR1': ['liver'],
-            'FOXA1': ['liver'],
-            'FOXA2': ['liver'],
-            'GABPA': ['liver'],
-            'HNF4A': ['liver'],
-            'JUND': ['liver'],
-            'MAX': ['liver'],
-            'NANOG': ['induced_pluripotent_stem_cell'],
-            'REST': ['liver'],
-            'TAF1': ['liver']
-        }
-
-    def make_ladder_predictions(self, model, transcription_factor, unbound_fraction=1):
+    def make_ladder_predictions(self, model, transcription_factor, unbound_fraction=1, leaderboard=True):
         tf_leaderboard = {
             'ARID3A': ['K562'],
             'ATF2': ['K562'],
@@ -226,7 +209,25 @@ class Evaluator:
             'YY1': ['K562'],
             'ZNF143': ['k562']
         }
-        for test_celltype in tf_leaderboard[transcription_factor]:
+        tf_final = {
+            'ATF2': ['HEPG2'],
+            'CTCF': ['PC-3', 'induced_pluripotent_stem_cell'],
+            'E2F1': ['K562'],
+            'EGR1': ['liver'],
+            'FOXA1': ['liver'],
+            'FOXA2': ['liver'],
+            'GABPA': ['liver'],
+            'HNF4A': ['liver'],
+            'JUND': ['liver'],
+            'MAX': ['liver'],
+            'NANOG': ['induced_pluripotent_stem_cell'],
+            'REST': ['liver'],
+            'TAF1': ['liver']
+        }
+
+        tf_mapper = tf_leaderboard if leaderboard else tf_final
+
+        for test_celltype in tf_mapper[transcription_factor]:
             self.num_train_instances = int(self.datareader.get_num_bound_lines(transcription_factor) * (1+unbound_fraction))
             print "num train instances", self.num_train_instances
             celltypes = self.datareader.get_celltypes_for_tf(transcription_factor)
@@ -242,14 +243,18 @@ class Evaluator:
                                                                                    celltypes,
                                                                                    [CrossvalOptions.balance_peaks],
                                                                                    unbound_fraction=unbound_fraction)):
-                if idx >= self.num_train_instances:
-                    break
                 (_, _), sequence, shape_features, dnase_labels, labels = instance
                 X_train[idx] = self.get_X_data(model, sequence)
                 y_train[idx] = self.get_y_test_data(model, labels)
                 S_train[idx] = self.get_S_data(model, shape_features)
                 da_train[idx] = self.get_da_test_data(model, dnase_labels)
+
             model.fit(X_train, y_train, S_train, gene_expression_features, da_train)
+
+            del X_train
+            del S_train
+            del y_train
+            del da_train
 
             # Make predictions
             with gzip.open(os.path.join(self.datapath, 'annotations/ladder_regions.blacklistfiltered.bed.gz')) as fin:
@@ -265,7 +270,7 @@ class Evaluator:
                 gene_expression_features = self.datareader.get_gene_expression_tpm(test_celltype)
                 curr_chromosome = 'chr1'
                 shape_features = self.datareader.get_shape_features(curr_chromosome)
-                dnase_list = self.datareader.get_DNAse_conservative_peak_lists(test_celltype)
+                dnase_list = self.datareader.get_DNAse_conservative_peak_lists([test_celltype])
 
                 for l_idx, line in enumerate(fin):
                     if idx == 0:
@@ -313,7 +318,7 @@ class Evaluator:
                     for idx, line in enumerate(fin):
                         print>>fout, str(line.strip())+'\t'+str(y_test[idx])
 
-    def run_cross_cell_benchmark(self, model, transcription_factor, save_train_set=False, unbound_fraction=1, arguments=""):
+    def run_cross_cell_benchmark(self, model, transcription_factor, save_train_set=False, unbound_fraction=1, arguments="", ambiguous_as_bound=False):
         '''
         Run cross celltype benchmark for specified model and model_parameters
         :param datapath: path to data directory
@@ -340,7 +345,7 @@ class Evaluator:
 
             for idx, instance in enumerate(self.datareader.generate_cross_celltype(transcription_factor,
                                            celltypes,
-                                           [CrossvalOptions.balance_peaks], unbound_fraction=unbound_fraction)):
+                                           [CrossvalOptions.balance_peaks], unbound_fraction=unbound_fraction, ambiguous_as_bound=ambiguous_as_bound)):
                 (_, _), sequence, shape_features, dnase_labels, labels = instance
 
                 X_train[idx] = self.get_X_data(model, sequence)
@@ -372,7 +377,7 @@ class Evaluator:
         # --------------- VALIDATION
         print
         print "RUNNING TESTS"
-        test_chromosomes = ['chr10', 'chr4', 'chr20', 'chr22']
+        test_chromosomes = sorted(['chr10', 'chr11', 'chr12', 'chr13'])
         curr_chr = '-1'
 
         y_test = None
@@ -392,7 +397,11 @@ class Evaluator:
 
         for instance in self.datareader.generate_cross_celltype(transcription_factor,
                                                                 [celltypes_test]):
+
             (chromosome, start), sequence, shape_features, dnase_labels, label = instance
+            if test_chromosomes[-1] < chromosome:
+                break
+
             if curr_chr == '-1' and chromosome in test_chromosomes:
                 curr_chr = chromosome
                 self.num_test_instances = self.datareader.get_num_instances(chromosome)
@@ -449,10 +458,12 @@ if __name__ == '__main__':
     parser.add_argument('--transcription_factor', '-tf', help='Choose transcription factor', required=True)
     parser.add_argument('--model', '-m', help='Choose model [TFC/THC]', required=True)
     parser.add_argument('--validate', '-v', action='store_true', help='run cross TF validation benchmark', required=False)
-    parser.add_argument('--predict', '-p', action='store_true', help='predict TF ladderboard', required=False)
+    parser.add_argument('--ladder', '-l', action='store_true', help='predict TF ladderboard', required=False)
+    parser.add_argument('--test', '-t', action='store_true', help='predict TF final round', required=False)
     parser.add_argument('--config', '-c', help='configuration of model', required=False)
     parser.add_argument('--unbound_fraction', '-uf', help='unbound fraction in training', required=False)
     parser.add_argument('--num_epochs', '-ne', help='number of epochs', required=False)
+    parser.add_argument('--ambiguous_bound', '-ab', action='store_true', help='treat ambiguous as bound', required=False)
     args = parser.parse_args()
     model = None
 
@@ -474,11 +485,15 @@ if __name__ == '__main__':
     if args.unbound_fraction is not None:
         unbound_fraction = float(args.unbound_fraction)
 
+
     if model is not None:
         transcription_factor = args.transcription_factor
         evaluator = Evaluator('../data/')
         if args.validate:
             evaluator.run_cross_cell_benchmark(model, transcription_factor, save_train_set=True,
-                                               unbound_fraction=unbound_fraction, arguments=str(vars(args)))
-        if args.predict:
-            evaluator.make_ladder_predictions(model, transcription_factor, unbound_fraction=unbound_fraction)
+                                               unbound_fraction=unbound_fraction, arguments=str(vars(args)), ambiguous_as_bound=args.ambiguous_bound)
+        if args.ladder:
+            evaluator.make_ladder_predictions(model, transcription_factor, unbound_fraction=unbound_fraction, leaderboard=True)
+
+        if args.test:
+            evaluator.make_ladder_predictions(model, transcription_factor, unbound_fraction, False)

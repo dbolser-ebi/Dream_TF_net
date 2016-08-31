@@ -417,20 +417,15 @@ class DataReader:
         return np.log2(norm_pwm / 0.25)
 
     def get_shape_features(self, chromosome):
+        savepath = os.path.join(self.datapath, 'preprocess/SHAPE_FEATURES/chromosome.npy')
+        if os.path.exists(savepath):
+            features = np.load(savepath)
+            return features
 
         with open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.MGW')) as fmgw,\
              open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.HelT')) as fhelt,\
              open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.Roll')) as froll,\
              open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.ProT')) as fprot:
-            '''
-            outmgw = []
-            outhelt = [0]
-            outroll = [0]
-            outprot = []
-
-
-            skip = True
-            '''
 
             def get_features(f_handler, add_zero):
                 out = [0] if add_zero else []
@@ -445,29 +440,16 @@ class DataReader:
                     else:
                         out.extend(map(float, line.strip().replace('NA', '0').split(',')))
                 return out
-            '''
-            for l_mgw in fmgw:
-                l_helt = fhelt.next()
-                l_roll = froll.next()
-                l_prot = fprot.next()
-                if l_mgw.strip() == '>'+chromosome:
-                    skip = False
-                elif skip:
-                    continue
-                elif l_mgw.startswith('>chr'):
-                    break
-                else:
-                    outmgw.extend(map(float, l_mgw.strip().replace('NA', '0').split(',')))
-                    outhelt.extend(map(float, l_helt.strip().replace('NA', '0').split(',')))
-                    outroll.extend(map(float, l_roll.strip().replace('NA', '0').split(',')))
-                    outprot.extend(map(float, l_prot.strip().replace('NA', '0').split(',')))
-            '''
+
             outmgw = get_features(fmgw, False)
             outhelt = get_features(fhelt, True)
             outroll = get_features(froll, True)
             outprot = get_features(fprot, False)
 
-            return np.array([outmgw, outhelt, outroll, outprot]).transpose()
+            features = np.array([outmgw, outhelt, outroll, outprot]).transpose()
+            np.save(savepath, features)
+
+            return features
 
     def get_DNAse_conservative_peak_lists(self, celltypes):
         dnase_files = []
@@ -488,7 +470,7 @@ class DataReader:
             dnase_lists.append(l)
         return dnase_lists
 
-    def generate_cross_celltype(self, transcription_factor, celltypes, options=[], unbound_fraction=1):
+    def generate_cross_celltype(self, transcription_factor, celltypes, options=[], unbound_fraction=1, ambiguous_as_bound=False):
         position_tree = set()  # keeps track of which lines (chr, start) to include
 
         if CrossvalOptions.filter_on_DNase_peaks in options:
@@ -523,7 +505,7 @@ class DataReader:
                 unbound_lines = []
                 # only the train set
                 for line_idx, line in enumerate(fin):
-                    if 'B' in line:
+                    if 'B' in line or (ambiguous_as_bound and 'A' in line):
                         bound_lines.append(line_idx)
                     else:
                         unbound_lines.append(line_idx)
@@ -579,10 +561,9 @@ class DataReader:
                         shape_features = self.get_shape_features(curr_chromosome)
 
                     for i, idx in enumerate(idxs):
-                        if bound_states[idx] == 'B':
+                        if bound_states[idx] == 'B' or (ambiguous_as_bound and bound_states[idx] == 'A'):
                             labels[:, i] = 1
-                    #if shape_features[start:start+self.sequence_length].size < 200:
-                    #    print chromosome, start, sequence, shape_features.shape[0]
+
                     yield (chromosome, start), sequence, shape_features[start:start+self.sequence_length], \
                         dnase_labels, labels
 
