@@ -112,9 +112,7 @@ class Evaluator:
             da_test = None
         return da_test
 
-    def save_model(self, transcription_factor, model, X_train, S_train, da_train, da_train_val, y_train, y_train_val, unbound_fraction):
-        unbound_fraction = str(unbound_fraction)
-        run_id = 'models/' + transcription_factor + model.__class__.__name__ + unbound_fraction
+    def save_model(self, transcription_factor, model, X_train, S_train, da_train, da_train_val, y_train, y_train_val, run_id):
         np.save(os.path.join(self.datapath, run_id+'Xtrain.npy'), X_train)
         np.save(os.path.join(self.datapath, run_id + 'Strain.npy'),
                 S_train)
@@ -126,10 +124,8 @@ class Evaluator:
         np.save(os.path.join(self.datapath, run_id + 'ytrain.npy'), y_train)
         np.save(os.path.join(self.datapath, run_id + 'ytrain_val.npy'), y_train_val)
 
-    def load_model(self, transcription_factor, model, unbound_fraction):
+    def load_model(self, transcription_factor, model, run_id):
         print "Loading train set from file"
-        unbound_fraction = str(unbound_fraction)
-        run_id = 'models/' + transcription_factor + model.__class__.__name__ + unbound_fraction
         X_train = np.load(os.path.join(self.datapath, run_id + 'Xtrain.npy'))
         S_train = np.load(
             os.path.join(self.datapath, run_id + 'Strain.npy'))
@@ -342,8 +338,11 @@ class Evaluator:
         celltypes_train = celltypes[:-1]
         celltypes_test = celltypes[-1]
 
-        if os.path.exists(os.path.join(self.datapath, 'models/'+transcription_factor+model.__class__.__name__+ str(unbound_fraction)+'Xtrain.npy')):
-            X_train, S_train, da_train, da_train_val, y_train, y_train_val = self.load_model(transcription_factor, model, unbound_fraction)
+        run_id = 'models/' + transcription_factor + model.__class__.__name__ + str(unbound_fraction) + str(ambiguous_as_bound) #id for binary data
+
+        if run_id in [mname for mname in os.listdir(os.path.join(self.datapath, 'models/'))]:
+            #os.path.exists(os.path.join(self.datapath, 'models/'+transcription_factor+model.__class__.__name__ + str(unbound_fraction)+'Xtrain.npy')):
+            X_train, S_train, da_train, da_train_val, y_train, y_train_val = self.load_model(transcription_factor, model, run_id)
         else:
             y_train_val = np.zeros((self.num_train_instances,), dtype=np.int32)
             X_train = self.get_X(model, self.num_train_instances)
@@ -356,7 +355,6 @@ class Evaluator:
                                            celltypes,
                                            [CrossvalOptions.balance_peaks], unbound_fraction=unbound_fraction, ambiguous_as_bound=ambiguous_as_bound)):
                 (_, _), sequence, shape_features, dnase_labels, labels = instance
-
                 X_train[idx] = self.get_X_data(model, sequence)
                 S_train[idx] = self.get_S_data(model, shape_features)
                 da_train[idx] = self.get_da_train_data(model, dnase_labels)
@@ -365,7 +363,8 @@ class Evaluator:
                 y_train_val[idx] = labels.flatten()[-1]
 
         if save_train_set:
-            self.save_model(transcription_factor, model, X_train, S_train, da_train, da_train_val, y_train, y_train_val, unbound_fraction)
+            self.save_model(transcription_factor, model, X_train, S_train,
+                            da_train, da_train_val, y_train, y_train_val, run_id)
 
         gene_expression_features = self.datareader.get_gene_expression_tpm(celltypes_train)
         model.fit(X_train, y_train, S_train, gene_expression_features, da_train)
@@ -464,7 +463,7 @@ class Evaluator:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--transcription_factors', '-tfs', help='Comma seperated list of transcription factors', required=True)
+    parser.add_argument('--transcription_factors', '-tfs', help='Comma separated list of transcription factors', required=True)
     parser.add_argument('--model', '-m', help='Choose model [TFC/THC]', required=True)
     parser.add_argument('--validate', '-v', action='store_true', help='run cross TF validation benchmark', required=False)
     parser.add_argument('--ladder', '-l', action='store_true', help='predict TF ladderboard', required=False)
@@ -473,14 +472,17 @@ if __name__ == '__main__':
     parser.add_argument('--unbound_fraction', '-uf', help='unbound fraction in training', required=False)
     parser.add_argument('--num_epochs', '-ne', help='number of epochs', required=False)
     parser.add_argument('--ambiguous_bound', '-ab', action='store_true', help='treat ambiguous as bound', required=False)
+    parser.add_argument('--bin_size', '-bs', help='Sequence bin size (must be an even number >= 200)', required=False)
     args = parser.parse_args()
     model = None
 
     num_epochs = 1 if args.num_epochs is None else int(args.num_epochs)
 
+    config = int(1 if args.config is None else args.config)
+
     if args.model == 'TFC':
         model = ConvNet('../log/', num_epochs=num_epochs, batch_size=512,
-                        num_gen_expr_features=32, config=int(args.config), dropout_rate=0.25,
+                        num_gen_expr_features=32, config=config, dropout_rate=0.25,
                         eval_size=0.2, num_shape_features=4)
     elif args.model == 'THC':
         from theanonet import *
@@ -500,7 +502,9 @@ if __name__ == '__main__':
         for transcription_factor in transcription_factors:
             if args.validate:
                 evaluator.run_cross_cell_benchmark(model, transcription_factor, save_train_set=True,
-                                                   unbound_fraction=unbound_fraction, arguments=str(vars(args)), ambiguous_as_bound=args.ambiguous_bound)
+                                                   unbound_fraction=unbound_fraction,
+                                                   arguments=str(vars(args)).replace('\'', ''),
+                                                   ambiguous_as_bound=args.ambiguous_bound)
             if args.ladder:
                 evaluator.make_ladder_predictions(model, transcription_factor, unbound_fraction=unbound_fraction, leaderboard=True)
 

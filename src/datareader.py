@@ -426,7 +426,7 @@ class DataReader:
         return np.log2(norm_pwm / 0.25)
 
     def get_shape_features(self, chromosome):
-        savepath = os.path.join(self.datapath, 'preprocess/SHAPE_FEATURES/chromosome.npy')
+        savepath = os.path.join(self.datapath, 'preprocess/SHAPE_FEATURES/chromosome_%s.npy' % chromosome)
         if os.path.exists(savepath):
             features = np.load(savepath)
             return features
@@ -479,7 +479,9 @@ class DataReader:
             dnase_lists.append(l)
         return dnase_lists
 
-    def generate_cross_celltype(self, transcription_factor, celltypes, options=[], unbound_fraction=1, ambiguous_as_bound=False):
+    def generate_cross_celltype(self, transcription_factor, celltypes, options=[],
+                                unbound_fraction=1, ambiguous_as_bound=False,
+                                bin_size=200):
         position_tree = set()  # keeps track of which lines (chr, start) to include
 
         if CrossvalOptions.filter_on_DNase_peaks in options:
@@ -532,7 +534,6 @@ class DataReader:
 
         with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
             dnase_lists = self.get_DNAse_conservative_peak_lists(celltypes)
-
             curr_chromosome = 'chr10'
             shape_features = self.get_shape_features(curr_chromosome)
 
