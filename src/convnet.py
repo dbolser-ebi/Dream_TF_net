@@ -104,6 +104,9 @@ class ConvNet:
 
         self.logits, self.summary_op = self.get_model()
 
+    def set_transcription_factor(self, transcription_factor):
+        self.transcription_factor = transcription_factor
+
     def get_model(self):
         with tf.variable_scope('DNASE') as scope:
             dnase_accessible = self.tf_dnase_accesible

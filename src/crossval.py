@@ -227,6 +227,8 @@ class Evaluator:
 
         tf_mapper = tf_leaderboard if leaderboard else tf_final
 
+        model.set_transcription_factor(transcription_factor)
+
         for test_celltype in tf_mapper[transcription_factor]:
             self.num_train_instances = int(self.datareader.get_num_bound_lines(transcription_factor) * (1+unbound_fraction))
             print "num train instances", self.num_train_instances
@@ -334,6 +336,8 @@ class Evaluator:
         #--------------- TRAIN
         celltypes = self.datareader.get_celltypes_for_tf(transcription_factor)
         self.num_train_instances = int(self.datareader.get_num_bound_lines(transcription_factor)*(1+unbound_fraction))
+
+        model.set_transcription_factor(transcription_factor)
 
         celltypes_train = celltypes[:-1]
         celltypes_test = celltypes[-1]
@@ -460,7 +464,7 @@ class Evaluator:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--transcription_factor', '-tf', help='Choose transcription factor', required=True)
+    parser.add_argument('--transcription_factors', '-tfs', help='Comma seperated list of transcription factors', required=True)
     parser.add_argument('--model', '-m', help='Choose model [TFC/THC]', required=True)
     parser.add_argument('--validate', '-v', action='store_true', help='run cross TF validation benchmark', required=False)
     parser.add_argument('--ladder', '-l', action='store_true', help='predict TF ladderboard', required=False)
@@ -477,7 +481,7 @@ if __name__ == '__main__':
     if args.model == 'TFC':
         model = ConvNet('../log/', num_epochs=num_epochs, batch_size=512,
                         num_gen_expr_features=32, config=int(args.config), dropout_rate=0.25,
-                        transcription_factor=args.transcription_factor, eval_size=0.2, num_shape_features=4)
+                        eval_size=0.2, num_shape_features=4)
     elif args.model == 'THC':
         from theanonet import *
         model = DNNClassifier(200, 4, 0.2, [100], [0.5], verbose=True, max_epochs=100, batch_size=512)
@@ -490,15 +494,15 @@ if __name__ == '__main__':
     if args.unbound_fraction is not None:
         unbound_fraction = float(args.unbound_fraction)
 
-
     if model is not None:
-        transcription_factor = args.transcription_factor
+        transcription_factors = args.transcription_factors.split(',')
         evaluator = Evaluator('../data/')
-        if args.validate:
-            evaluator.run_cross_cell_benchmark(model, transcription_factor, save_train_set=True,
-                                               unbound_fraction=unbound_fraction, arguments=str(vars(args)), ambiguous_as_bound=args.ambiguous_bound)
-        if args.ladder:
-            evaluator.make_ladder_predictions(model, transcription_factor, unbound_fraction=unbound_fraction, leaderboard=True)
+        for transcription_factor in transcription_factors:
+            if args.validate:
+                evaluator.run_cross_cell_benchmark(model, transcription_factor, save_train_set=True,
+                                                   unbound_fraction=unbound_fraction, arguments=str(vars(args)), ambiguous_as_bound=args.ambiguous_bound)
+            if args.ladder:
+                evaluator.make_ladder_predictions(model, transcription_factor, unbound_fraction=unbound_fraction, leaderboard=True)
 
-        if args.test:
-            evaluator.make_ladder_predictions(model, transcription_factor, unbound_fraction, False)
+            if args.test:
+                evaluator.make_ladder_predictions(model, transcription_factor, unbound_fraction, False)
