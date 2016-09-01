@@ -484,6 +484,7 @@ class DataReader:
                                 bin_size=200):
         position_tree = set()  # keeps track of which lines (chr, start) to include
 
+
         if CrossvalOptions.filter_on_DNase_peaks in options:
             with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
                 fin.readline()
@@ -533,22 +534,24 @@ class DataReader:
                 position_tree.update(a[:int(0.1*len(a))])
 
         with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+            bin_correction = max(0, (bin_size - 200) / 2)
             dnase_lists = self.get_DNAse_conservative_peak_lists(celltypes)
             curr_chromosome = 'chr10'
             shape_features = self.get_shape_features(curr_chromosome)
-
             celltype_names = fin.readline().split()[3:]
             idxs = []
+
             for i, celltype in enumerate(celltype_names):
                 if celltype in celltypes:
                     idxs.append(i)
+
             for l_idx, line in enumerate(fin):
                 if len(position_tree) == 0 or l_idx in position_tree:
                     tokens = line.split()
                     bound_states = tokens[3:]
                     start = int(tokens[1])
                     chromosome = tokens[0]
-                    sequence = self.hg19[chromosome][start:start + self.sequence_length]
+                    sequence = self.hg19[chromosome][start-bin_correction:start + self.sequence_length + bin_correction]
                     labels = np.zeros((1, len(celltypes)), dtype=np.float32)
 
                     # find position in dnase on the left in sorted order
@@ -574,7 +577,8 @@ class DataReader:
                         if bound_states[idx] == 'B' or (ambiguous_as_bound and bound_states[idx] == 'A'):
                             labels[:, i] = 1
 
-                    yield (chromosome, start), sequence, shape_features[start:start+self.sequence_length], \
+                    yield (chromosome, start), sequence, \
+                          shape_features[start-bin_correction:start+self.sequence_length+bin_correction], \
                         dnase_labels, labels
 
 if __name__ == '__main__':

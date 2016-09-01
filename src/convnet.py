@@ -72,7 +72,7 @@ class EarlyStopping:
 
 class ConvNet:
     def __init__(self, model_dir, batch_size=256, num_channels=4, num_epochs=2,
-                 width=200, num_outputs=1, eval_size=0.2, early_stopping=100,
+                 sequence_width=200, num_outputs=1, eval_size=0.2, early_stopping=100,
                  num_gen_expr_features=57820, num_shape_features=1, dropout_rate=.5,
                  config=1, verbose=True, datapath ='../data/', transcription_factor='CTCF'):
         if config is None:
@@ -86,16 +86,16 @@ class ConvNet:
         self.batch_size = batch_size
         self.model_dir = model_dir
         self.num_epochs = num_epochs
-        self.width = width
+        self.sequence_width = sequence_width
         self.eval_size = eval_size
         self.verbose = verbose
         self.num_genexpr_features = num_gen_expr_features
         self.tf_gene_expression = tf.placeholder(tf.float32, shape=(1, num_gen_expr_features), name='tpm_values')
         self.tf_dnase_accesible = tf.placeholder(tf.float32, shape=(batch_size, 1), name='dnase_conservative_peak')
         self.tf_shape = tf.placeholder(tf.float32, shape=(batch_size, self.height,
-                                                          width, num_shape_features), name='shapes')
+                                                          sequence_width, num_shape_features), name='shapes')
         self.tf_sequence = tf.placeholder(tf.float32, shape=(batch_size, self.height,
-                                          width, self.num_channels), name='sequences')
+                                          sequence_width, self.num_channels), name='sequences')
         self.tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_outputs), name='labels')
         self.keep_prob = tf.placeholder(tf.float32, name='keep_probability')
         self.early_stopping = EarlyStopping(max_stalls=early_stopping)
@@ -125,11 +125,11 @@ class ConvNet:
                             usual_conv_kernel = tf.get_variable('motif_%d' % idx, shape=(1, pssm.shape[0], pssm.shape[1], 1), dtype=tf.float32,
                                                                 initializer=tf.constant_initializer(pssm))
                             depth = 1
-                            width = pssm.shape[0]
+                            filter_width = pssm.shape[0]
                             conv_biases = tf.zeros(shape=[depth])
                             stride = 1
                             conv = conv1D(self.tf_sequence, usual_conv_kernel, strides=[1, 1, stride, 1])
-                            num_nodes = (self.width - width) / stride + 1
+                            num_nodes = (self.sequence_width - filter_width) / stride + 1
                             denominator = 4
                             for div in range(4, 10):
                                 if num_nodes % div == 0:
@@ -161,10 +161,9 @@ class ConvNet:
                 pool = tf.nn.relu(max_pool_1xn(activation, pool_width))
 
             with tf.variable_scope('fc100') as fcscope:
-                fc_kernel = weight_variable([5*depth, 100])
-                fc_bias = bias_variable([100])
-                flattened = tf.reshape(pool, [-1, 5*depth])
-                drop_shape = tf.nn.relu(tf.matmul(flattened, fc_kernel) + fc_bias)
+                flattened = flatten(pool)
+                drop_shape = fully_connected(flattened, 100)
+
 
         with tf.variable_scope('R_MOTIF') as scope:
             with tf.variable_scope('conv15_15') as convscope:
@@ -265,9 +264,9 @@ class ConvNet:
                     end = min(offset+self.batch_size, num_examples)
                     for celltype_idx in xrange(y.shape[1]):
                         batch_sequence = np.reshape(X_train[offset:end, :],
-                                                    (self.batch_size, self.height, self.width, self.num_channels))
+                                                    (self.batch_size, self.height, self.sequence_width, self.num_channels))
                         batch_shapes = np.reshape(S_train[offset:end, :],
-                                                  (self.batch_size, self.height, self.width, self.num_shape_features))
+                                                  (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
                         batch_labels = np.reshape(y_train[offset:end, celltype_idx], (self.batch_size, 1))
                         batch_dnase_labels = np.reshape(da_train[offset:end, celltype_idx], (self.batch_size, 1))
                         feed_dict = {self.tf_sequence: batch_sequence,
@@ -310,9 +309,9 @@ class ConvNet:
                     end = min(offset+self.batch_size, num_examples)
                     for celltype_idx in xrange(y.shape[1]):
                         batch_sequence = np.reshape(X_val[offset:end, :],
-                                                    (self.batch_size, self.height, self.width, self.num_channels))
+                                                    (self.batch_size, self.height, self.sequence_width, self.num_channels))
                         batch_shapes = np.reshape(S_val[offset:end, :],
-                                                  (self.batch_size, self.height, self.width, self.num_shape_features))
+                                                  (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
                         batch_labels = np.reshape(y_val[offset:end, celltype_idx], (self.batch_size, 1))
                         batch_dnase_labels = np.reshape(da_val[offset:end, celltype_idx], (self.batch_size, 1))
                         feed_dict = {self.tf_sequence: batch_sequence,
@@ -363,9 +362,9 @@ class ConvNet:
                 end = min(offset + self.batch_size, num_examples)
                 offset_ = offset - (self.batch_size-(end-offset))
                 batch_sequence = np.reshape(X[offset_:end, :],
-                                            (self.batch_size, self.height, self.width, self.num_channels))
+                                            (self.batch_size, self.height, self.sequence_width, self.num_channels))
                 batch_shapes = np.reshape(S[offset_:end, :],
-                                          (self.batch_size, self.height, self.width, self.num_shape_features))
+                                          (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
 
                 batch_da = np.reshape(da[offset_:end, :],
                                       (self.batch_size, 1))
