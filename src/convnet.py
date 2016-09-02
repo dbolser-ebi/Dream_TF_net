@@ -4,6 +4,7 @@ from sklearn.cross_validation import StratifiedKFold
 import time
 from datareader import DataReader
 from tensorflow.contrib.layers.python.layers import *
+from sys import stdout
 
 
 class configuration():
@@ -122,8 +123,10 @@ class ConvNet:
                     with tf.variable_scope(transcription_factor) as tfscope:
                         for idx, motif in enumerate(motifs):
                             pssm = self.datareader.calc_pssm(motif)
-                            usual_conv_kernel = tf.get_variable('motif_%d' % idx, shape=(1, pssm.shape[0], pssm.shape[1], 1), dtype=tf.float32,
-                                                                initializer=tf.constant_initializer(pssm))
+                            usual_conv_kernel = \
+                                tf.get_variable('motif_%d' % idx,
+                                                shape=(1, pssm.shape[0], pssm.shape[1], 1), dtype=tf.float32,
+                                                initializer=tf.constant_initializer(pssm))
                             depth = 1
                             filter_width = pssm.shape[0]
                             conv_biases = tf.zeros(shape=[depth])

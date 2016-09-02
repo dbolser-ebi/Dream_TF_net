@@ -162,12 +162,14 @@ class DataReader:
         tfs = []
         for f in files:
             tfs.append(f.split('.')[0])
+        tfs = list(set(tfs))
         return tfs
 
     def get_celltypes(self):
         celltypes = []
         for f in [f for f in os.listdir(self.datapath+self.dna_peak_c_path)]:
             celltypes.append(f.split('.')[1])
+        celltypes = list(set(celltypes))
         return celltypes
 
     def get_chromosome_ordering(self):
@@ -460,6 +462,9 @@ class DataReader:
 
             return features
 
+    def get_dnase_fold_change_track(self, celltype):
+        return
+
     def get_DNAse_conservative_peak_lists(self, celltypes):
         dnase_files = []
         dnase_lists = []
@@ -483,7 +488,6 @@ class DataReader:
                                 unbound_fraction=1, ambiguous_as_bound=False,
                                 bin_size=200):
         position_tree = set()  # keeps track of which lines (chr, start) to include
-
 
         if CrossvalOptions.filter_on_DNase_peaks in options:
             with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:

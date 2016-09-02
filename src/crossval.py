@@ -409,7 +409,7 @@ class Evaluator:
         t_idx = 0
 
         for instance in self.datareader.generate_cross_celltype(transcription_factor,
-                                                                [celltypes_test], bin_size=400):
+                                                                [celltypes_test], bin_size=bin_size):
 
             (chromosome, start), sequence, shape_features, dnase_labels, label = instance
             if test_chromosomes[-1] < chromosome:
