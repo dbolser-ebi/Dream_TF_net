@@ -93,7 +93,7 @@ class Evaluator:
 
     def get_da_train(self, model, num_instances, num_celltypes):
         if isinstance(model, ConvNet):
-            da_train = np.zeros((num_instances, num_celltypes), dtype=np.float32)
+            da_train = np.zeros((num_instances, 4, num_celltypes), dtype=np.float32)
         else:
             da_train = None
         return da_train
@@ -107,7 +107,7 @@ class Evaluator:
 
     def get_da_test(self, model, num_instances):
         if isinstance(model, ConvNet):
-            da_test = np.zeros((num_instances,1), dtype=np.float16)
+            da_test = np.zeros((num_instances, 4, 1), dtype=np.float16)
         else:
             da_test = None
         return da_test
@@ -156,9 +156,9 @@ class Evaluator:
         else:
             return np.max(labels.flatten()[:-1])
 
-    def get_da_train_data(self, model, labels):
+    def get_da_train_data(self, model, features):
         if isinstance(model, ConvNet):
-            return labels[:, :-1]
+            return features[:, :-1]
         else:
             return None
 
@@ -168,9 +168,9 @@ class Evaluator:
         else:
             return np.max(labels)
 
-    def get_da_test_data(self, model, labels):
+    def get_da_test_data(self, model, features):
         if isinstance(model, ConvNet):
-            return labels
+            return features
         else:
             return None
 
@@ -247,7 +247,7 @@ class Evaluator:
                 (_, _), sequence, shape_features, dnase_labels, labels = instance
                 X_train[idx] = self.get_X_data(model, sequence)
                 y_train[idx] = self.get_y_test_data(model, labels)
-                S_train[idx] = self.get_S_data(model, shape_features)
+                S_train[idx] = self.get_S_data(model, shape_features, bin_size)
                 da_train[idx] = self.get_da_test_data(model, dnase_labels)
 
             model.fit(X_train, y_train, S_train, gene_expression_features, da_train)
@@ -343,7 +343,14 @@ class Evaluator:
         run_id = 'models/' + transcription_factor + model.__class__.__name__ + \
                  str(unbound_fraction) + str(ambiguous_as_bound) + str(bin_size)
 
-        if run_id in [mname for mname in os.listdir(os.path.join(self.datapath, 'models/'))]:
+        def already_computed():
+            fnames = [mname for mname in os.listdir(os.path.join(self.datapath, 'models/'))]
+            for fname in fnames:
+                if run_id[7:] in fname:
+                    return True
+            return False
+
+        if already_computed():
             X_train, S_train, da_train, da_train_val, y_train, y_train_val = self.load_model(transcription_factor, model, run_id)
         else:
             y_train_val = np.zeros((self.num_train_instances,), dtype=np.int32)
@@ -351,7 +358,7 @@ class Evaluator:
             S_train = self.get_S(model, self.num_train_instances, bin_size)
             y_train = self.get_y_train(model, self.num_train_instances, len(celltypes_train))
             da_train = self.get_da_train(model, self.num_train_instances, len(celltypes_train))
-            da_train_val = np.zeros((self.num_train_instances, 1), dtype=np.float32)
+            da_train_val = np.zeros((self.num_train_instances, 4, 1), dtype=np.float32)
 
             for idx, instance in enumerate(self.datareader.generate_cross_celltype(transcription_factor,
                                            celltypes,
@@ -359,13 +366,15 @@ class Evaluator:
                                             unbound_fraction=unbound_fraction,
                                             ambiguous_as_bound=ambiguous_as_bound,
                                             bin_size=bin_size)):
-                (_, _), sequence, shape_features, dnase_labels, labels = instance
+                (_, _), sequence, shape_features, dnase_features, labels = instance
                 X_train[idx] = self.get_X_data(model, sequence)
                 S_train[idx] = self.get_S_data(model, shape_features, bin_size)
-                da_train[idx] = self.get_da_train_data(model, dnase_labels)
-                da_train_val[idx] = dnase_labels[:, -1]
+                da_train[idx] = self.get_da_train_data(model, dnase_features)
+                da_train_val[idx, :, :] = np.reshape(dnase_features[:, -1], (4, 1))
                 y_train[idx] = self.get_y_train_data(model, labels)
                 y_train_val[idx] = labels.flatten()[-1]
+                if idx % 10000 == 0:
+                    print idx
 
         if save_train_set:
             self.save_model(transcription_factor, model, X_train, S_train,
@@ -375,7 +384,7 @@ class Evaluator:
         model.fit(X_train, y_train, S_train, gene_expression_features, da_train)
 
         gene_expression_features = self.datareader.get_gene_expression_tpm(celltypes_test)
-        predictions = model.predict(X_train, S_train, gene_expression_features, np.zeros((da_train.shape[0], 1), dtype=np.float32))
+        predictions = model.predict(X_train, S_train, gene_expression_features, da_train_val)
 
         print 'TRAINING COMPLETED'
         self.print_results(y_train_val, predictions)
@@ -411,7 +420,7 @@ class Evaluator:
         for instance in self.datareader.generate_cross_celltype(transcription_factor,
                                                                 [celltypes_test], bin_size=bin_size):
 
-            (chromosome, start), sequence, shape_features, dnase_labels, label = instance
+            (chromosome, start), sequence, shape_features, dnase_features, label = instance
             if test_chromosomes[-1] < chromosome:
                 break
 
@@ -457,7 +466,7 @@ class Evaluator:
                 y_test[idx] = label
                 X_test[idx] = self.get_X_data(model, sequence)
                 S_test[idx] = self.get_S_data(model, shape_features, bin_size)
-                da_test[idx] = dnase_labels
+                da_test[idx, :, :] = dnase_features
                 idx += 1
 
         print "Overall test results"

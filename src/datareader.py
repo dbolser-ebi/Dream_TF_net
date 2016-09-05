@@ -7,8 +7,14 @@ import math
 import random
 import warnings
 from sklearn.decomposition import PCA
+from subprocess import call, Popen, PIPE
+import re
 import bisect
+import mmap
 
+# Low mem overhead splitting
+def split_iter(string):
+    return (x.group(0) for x in re.finditer(r"[ \t\f\v0-9A-Za-z,.=']+", string))
 
 def optional_gzip_open(fname):
     return gzip.open(fname) if fname.endswith(".gz") else open(fname)
@@ -77,7 +83,7 @@ class DataReader:
         self.datapath = datapath
         self.dna_peak_c_path = 'dnase_peaks_conservative/'
         self.label_path = 'chipseq_labels/'
-        self.hg19 = Fasta(datapath+'annotations/hg19.genome.fa')
+        self.hg19 = Fasta(os.path.join(datapath, 'annotations/hg19.genome.fa'))
         self.preprocess_path = 'preprocess/'
 
         # constants
@@ -128,6 +134,7 @@ class DataReader:
                     header_tokens = fin.readline().split()
                     celltypes = header_tokens[3:]
                 break
+        celltypes = list(set(celltypes))
         return celltypes
 
     def get_num_sequence_features(self, transcription_factor):
@@ -462,9 +469,6 @@ class DataReader:
 
             return features
 
-    def get_dnase_fold_change_track(self, celltype):
-        return
-
     def get_DNAse_conservative_peak_lists(self, celltypes):
         dnase_files = []
         dnase_lists = []
@@ -549,7 +553,16 @@ class DataReader:
                 if celltype in celltypes:
                     idxs.append(i)
 
+            dnase_feature_handlers = []
+            for celltype in celltypes:
+                f = open(os.path.join(self.datapath, 'preprocess/DNASE_FEATURES/%s_train.txt' % celltype))
+                dnase_feature_handlers.append(f)
+
             for l_idx, line in enumerate(fin):
+                dnase_feature_lines = []
+                for handler in dnase_feature_handlers:
+                    dnase_feature_lines.append(handler.next())
+
                 if len(position_tree) == 0 or l_idx in position_tree:
                     tokens = line.split()
                     bound_states = tokens[3:]
@@ -573,6 +586,16 @@ class DataReader:
                             if dnase_start <= start + 200 and start <= dnase_end:
                                 dnase_labels[:, c_idx] = 1
 
+                    # dnase fold coverage
+                    dnase_fold_coverage = np.zeros((4, len(celltypes)), dtype=np.float32)
+
+                    for c_idx, celltype in enumerate(celltypes):
+                        tokens = map(float, dnase_feature_lines[c_idx].split())
+                        dnase_fold_coverage[0, c_idx] = dnase_labels[0, c_idx]
+                        dnase_fold_coverage[1, c_idx] = tokens[0]
+                        dnase_fold_coverage[2, c_idx] = tokens[1]
+                        dnase_fold_coverage[3, c_idx] = tokens[2]
+
                     if chromosome != curr_chromosome:
                         curr_chromosome = chromosome
                         shape_features = self.get_shape_features(curr_chromosome)
@@ -583,7 +606,10 @@ class DataReader:
 
                     yield (chromosome, start), sequence, \
                           shape_features[start-bin_correction:start+self.sequence_length+bin_correction], \
-                        dnase_labels, labels
+                        dnase_fold_coverage, labels
+
+            for handler in dnase_feature_handlers:
+                handler.close()
 
 if __name__ == '__main__':
     datareader = DataReader('../data/')

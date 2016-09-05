@@ -92,7 +92,7 @@ class ConvNet:
         self.verbose = verbose
         self.num_genexpr_features = num_gen_expr_features
         self.tf_gene_expression = tf.placeholder(tf.float32, shape=(1, num_gen_expr_features), name='tpm_values')
-        self.tf_dnase_accesible = tf.placeholder(tf.float32, shape=(batch_size, 1), name='dnase_conservative_peak')
+        self.tf_dnase_features = tf.placeholder(tf.float32, shape=(batch_size, 4), name='dnase_features')
         self.tf_shape = tf.placeholder(tf.float32, shape=(batch_size, self.height,
                                                           sequence_width, num_shape_features), name='shapes')
         self.tf_sequence = tf.placeholder(tf.float32, shape=(batch_size, self.height,
@@ -110,7 +110,7 @@ class ConvNet:
 
     def get_model(self):
         with tf.variable_scope('DNASE') as scope:
-            dnase_accessible = self.tf_dnase_accesible
+            dnase_features = self.tf_dnase_features
 
         with tf.variable_scope('USUAL_SUSPECTS') as scope:
             activations = []
@@ -199,9 +199,9 @@ class ConvNet:
                 elif self.config == int(configuration.SEQ_SHAPE_GENEXPR_SPECIFICUSUAL):
                     merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr, drop_usual])
                 elif self.config == int(configuration.SEQ_SHAPE_GENEXPR_ALLUSUAL_DNASE):
-                    merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr, drop_usual, dnase_accessible])
+                    merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr, drop_usual, dnase_features])
                 elif self.config == int(configuration.SEQ_DNASE):
-                    merged = tf.concat(1, [drop_rmotif, dnase_accessible])
+                    merged = tf.concat(1, [drop_rmotif, dnase_features])
 
             with tf.variable_scope('fc') as fcscope:
                 activation = fully_connected(merged, 1000)
@@ -218,137 +218,140 @@ class ConvNet:
         return logits, merged_summary
 
     def fit(self, X, y, S=None, gene_expression=None, da=None):
+
         summary_writer = tf.train.SummaryWriter(self.model_dir + 'train')
+        try:
+            loss = calc_loss(self.logits, self.tf_train_labels)
+            optimizer = tf.train.AdamOptimizer(learning_rate=0.001, beta1=0.9, beta2=0.999).minimize(loss)
 
-        loss = calc_loss(self.logits, self.tf_train_labels)
-        optimizer = tf.train.AdamOptimizer(learning_rate=0.001, beta1=0.9, beta2=0.999).minimize(loss)
+            saver = tf.train.Saver()
 
-        saver = tf.train.Saver()
+            y_ = np.max(y, axis=1)
+            kf = StratifiedKFold(y_, round(1. / self.eval_size))
+            train_indices, valid_indices = next(iter(kf))
 
-        y_ = np.max(y, axis=1)
-        kf = StratifiedKFold(y_, round(1. / self.eval_size))
-        train_indices, valid_indices = next(iter(kf))
+            X_train = X[train_indices]
+            X_val = X[valid_indices]
 
-        X_train = X[train_indices]
-        X_val = X[valid_indices]
+            S_train = S[train_indices]
+            S_val = S[valid_indices]
 
-        S_train = S[train_indices]
-        S_val = S[valid_indices]
+            y_train = y[train_indices]
+            y_val = y[valid_indices]
 
-        y_train = y[train_indices]
-        y_val = y[valid_indices]
+            da_train = da[train_indices]
+            da_val = da[valid_indices]
 
-        da_train = da[train_indices]
-        da_val = da[valid_indices]
+            print 'Train size', X_train.shape[0], 'Validation size', X_val.shape[0]
 
-        print 'Train size', X_train.shape[0], 'Validation size', X_val.shape[0]
+            with tf.Session() as session:
+                tf.initialize_all_variables().run()
 
-        with tf.Session() as session:
-            tf.initialize_all_variables().run()
+                if self.verbose:
+                    print
+                    print "EPOCH\tTRAIN LOSS\tVALID LOSS\tVALID ACCURACY\tTIME"
 
-            if self.verbose:
-                print
-                print "EPOCH\tTRAIN LOSS\tVALID LOSS\tVALID ACCURACY\tTIME"
+                # Training
+                for epoch in xrange(1, self.num_epochs+1):
+                    start_time = time.time()
+                    num_examples = X_train.shape[0]
+                    losses = []
 
-            # Training
-            for epoch in xrange(1, self.num_epochs+1):
-                start_time = time.time()
-                num_examples = X_train.shape[0]
-                losses = []
+                    shuffle_idxs = np.arange(X_train.shape[0])
+                    np.random.shuffle(shuffle_idxs)
+                    X_train = X_train[shuffle_idxs]
+                    S_train = S_train[shuffle_idxs]
+                    y_train = y_train[shuffle_idxs]
+                    da_train = da_train[shuffle_idxs]
 
-                shuffle_idxs = np.arange(X_train.shape[0])
-                np.random.shuffle(shuffle_idxs)
-                X_train = X_train[shuffle_idxs]
-                S_train = S_train[shuffle_idxs]
-                y_train = y_train[shuffle_idxs]
-                da_train = da_train[shuffle_idxs]
+                    for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
+                        end = min(offset+self.batch_size, num_examples)
+                        for celltype_idx in xrange(y.shape[1]):
+                            batch_sequence = np.reshape(X_train[offset:end, :],
+                                                        (self.batch_size, self.height, self.sequence_width, self.num_channels))
+                            batch_shapes = np.reshape(S_train[offset:end, :],
+                                                      (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
+                            batch_labels = np.reshape(y_train[offset:end, celltype_idx], (self.batch_size, 1))
+                            batch_dnase_features = np.reshape(da_train[offset:end, :, celltype_idx], (self.batch_size, 4))
+                            feed_dict = {self.tf_sequence: batch_sequence,
+                                         self.tf_shape: batch_shapes,
+                                         self.tf_train_labels: batch_labels,
+                                         self.tf_gene_expression:
+                                             np.reshape(gene_expression[celltype_idx],
+                                                        (1, self.num_genexpr_features)),
+                                         self.keep_prob: 1-self.dropout_rate,
+                                         self.tf_dnase_features: batch_dnase_features
+                                         }
+                            '''
+                            if np.random.rand() <= 0.9 or celltype_idx != 0:
+                                _, r_loss = session.run([optimizer, loss], feed_dict=feed_dict)
+                            else:
+                                run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+                                run_metadata = tf.RunMetadata()
 
-                for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
-                    end = min(offset+self.batch_size, num_examples)
-                    for celltype_idx in xrange(y.shape[1]):
-                        batch_sequence = np.reshape(X_train[offset:end, :],
-                                                    (self.batch_size, self.height, self.sequence_width, self.num_channels))
-                        batch_shapes = np.reshape(S_train[offset:end, :],
-                                                  (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
-                        batch_labels = np.reshape(y_train[offset:end, celltype_idx], (self.batch_size, 1))
-                        batch_dnase_labels = np.reshape(da_train[offset:end, celltype_idx], (self.batch_size, 1))
-                        feed_dict = {self.tf_sequence: batch_sequence,
-                                     self.tf_shape: batch_shapes,
-                                     self.tf_train_labels: batch_labels,
-                                     self.tf_gene_expression:
-                                         np.reshape(gene_expression[celltype_idx],
-                                                    (1, self.num_genexpr_features)),
-                                     self.keep_prob: 1-self.dropout_rate,
-                                     self.tf_dnase_accesible: batch_dnase_labels
-                                     }
-                        '''
-                        if np.random.rand() <= 0.9 or celltype_idx != 0:
-                            _, r_loss = session.run([optimizer, loss], feed_dict=feed_dict)
-                        else:
-                            run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-                            run_metadata = tf.RunMetadata()
-
-                            summary, _, r_loss = session.run([self.summary_op, optimizer, loss],
-                                                             feed_dict=feed_dict,
-                                                             options=run_options,
-                                                             run_metadata=run_metadata)
+                                summary, _, r_loss = session.run([self.summary_op, optimizer, loss],
+                                                                 feed_dict=feed_dict,
+                                                                 options=run_options,
+                                                                 run_metadata=run_metadata)
+                                if self.model_dir is not None:
+                                    summary_writer.add_summary(summary)
+                                    summary_writer.add_run_metadata(run_metadata, 'Epoch %d, offset %d' % (epoch, offset))
+                            '''
+                            summary, _, r_loss = session.run([self.summary_op, optimizer, loss], feed_dict=feed_dict)
                             if self.model_dir is not None:
                                 summary_writer.add_summary(summary)
-                                summary_writer.add_run_metadata(run_metadata, 'Epoch %d, offset %d' % (epoch, offset))
-                        '''
-                        summary, _, r_loss = session.run([self.summary_op, optimizer, loss], feed_dict=feed_dict)
-                        if self.model_dir is not None:
-                            summary_writer.add_summary(summary)
-                        losses.append(r_loss)
-                losses = np.array(losses)
-                t_loss = np.mean(losses)
+                            losses.append(r_loss)
+                    losses = np.array(losses)
+                    t_loss = np.mean(losses)
 
-                # Validation
-                accuracies = []
-                losses = []
-                num_examples = X_val.shape[0]
-                prediction_op = tf.nn.sigmoid(self.logits)
-                for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
-                    end = min(offset+self.batch_size, num_examples)
-                    for celltype_idx in xrange(y.shape[1]):
-                        batch_sequence = np.reshape(X_val[offset:end, :],
-                                                    (self.batch_size, self.height, self.sequence_width, self.num_channels))
-                        batch_shapes = np.reshape(S_val[offset:end, :],
-                                                  (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
-                        batch_labels = np.reshape(y_val[offset:end, celltype_idx], (self.batch_size, 1))
-                        batch_dnase_labels = np.reshape(da_val[offset:end, celltype_idx], (self.batch_size, 1))
-                        feed_dict = {self.tf_sequence: batch_sequence,
-                                     self.tf_shape: batch_shapes,
-                                     self.tf_train_labels: batch_labels,
-                                     self.tf_gene_expression:
-                                         np.reshape(gene_expression[celltype_idx],
-                                                    (1, self.num_genexpr_features)),
-                                     self.keep_prob: 1,
-                                     self.tf_dnase_accesible: batch_dnase_labels,
-                                     }
-                        prediction, valid_loss = session.run([prediction_op, loss], feed_dict=feed_dict)
-                        accuracies.append(100.0*np.sum(np.abs(prediction-batch_labels) < 0.5)/batch_labels.size)
-                        losses.append(valid_loss)
-                v_acc = np.mean(np.array(accuracies))
-                v_loss = np.mean(np.array(losses))
+                    # Validation
+                    accuracies = []
+                    losses = []
+                    num_examples = X_val.shape[0]
+                    prediction_op = tf.nn.sigmoid(self.logits)
+                    for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
+                        end = min(offset+self.batch_size, num_examples)
+                        for celltype_idx in xrange(y.shape[1]):
+                            batch_sequence = np.reshape(X_val[offset:end, :],
+                                                        (self.batch_size, self.height, self.sequence_width, self.num_channels))
+                            batch_shapes = np.reshape(S_val[offset:end, :],
+                                                      (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
+                            batch_labels = np.reshape(y_val[offset:end, celltype_idx], (self.batch_size, 1))
+                            batch_dnase_features = np.reshape(da_val[offset:end, :, celltype_idx], (self.batch_size, 4))
+                            feed_dict = {self.tf_sequence: batch_sequence,
+                                         self.tf_shape: batch_shapes,
+                                         self.tf_train_labels: batch_labels,
+                                         self.tf_gene_expression:
+                                             np.reshape(gene_expression[celltype_idx],
+                                                        (1, self.num_genexpr_features)),
+                                         self.keep_prob: 1,
+                                         self.tf_dnase_features: batch_dnase_features,
+                                         }
+                            prediction, valid_loss = session.run([prediction_op, loss], feed_dict=feed_dict)
+                            accuracies.append(100.0*np.sum(np.abs(prediction-batch_labels) < 0.5)/batch_labels.size)
+                            losses.append(valid_loss)
+                    v_acc = np.mean(np.array(accuracies))
+                    v_loss = np.mean(np.array(losses))
 
-                early_score = self.early_stopping.update(v_loss)
-                if early_score == 2:
-                    # Use the best model on validation
-                    saver.save(session, self.model_dir + 'conv%s%d.ckpt' % (self.transcription_factor, self.config))
-                    if self.verbose:
-                        print (bcolors.OKCYAN+"%d\t%f\t%f\t%.2f%%\t\t%ds"+bcolors.ENDC) % \
-                              (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
-                elif early_score == 1:
-                    if self.verbose:
-                        print "%d\t%f\t%f\t%.2f%%\t\t%ds" % \
-                              (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
-                elif early_score == 0:
-                    if self.verbose:
-                        print "Early stopping triggered, exiting..."
-                        break
+                    early_score = self.early_stopping.update(v_loss)
+                    if early_score == 2:
+                        # Use the best model on validation
+                        saver.save(session, self.model_dir + 'conv%s%d.ckpt' % (self.transcription_factor, self.config))
+                        if self.verbose:
+                            print (bcolors.OKCYAN+"%d\t%f\t%f\t%.2f%%\t\t%ds"+bcolors.ENDC) % \
+                                  (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
+                    elif early_score == 1:
+                        if self.verbose:
+                            print "%d\t%f\t%f\t%.2f%%\t\t%ds" % \
+                                  (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
+                    elif early_score == 0:
+                        if self.verbose:
+                            print "Early stopping triggered, exiting..."
+                            break
+                    summary_writer.add_graph(session.graph)
 
-            summary_writer.add_graph(session.graph)
+        except KeyboardInterrupt:
+            pass
 
     def predict(self, X, S=None, gene_expression=None, da=None):
         '''
@@ -369,15 +372,15 @@ class ConvNet:
                 batch_shapes = np.reshape(S[offset_:end, :],
                                           (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
 
-                batch_da = np.reshape(da[offset_:end, :],
-                                      (self.batch_size, 1))
+                batch_da_features = np.reshape(da[offset_:end, :, 0],
+                                      (self.batch_size, 4))
                 feed_dict = {self.tf_sequence: batch_sequence,
                              self.tf_shape: batch_shapes,
                              self.tf_gene_expression:
                                  np.reshape(gene_expression[0],
                                             (1, self.num_genexpr_features)),
                              self.keep_prob: 1,
-                             self.tf_dnase_accesible: batch_da,
+                             self.tf_dnase_features: batch_da_features,
                              }
                 prediction = session.run([prediction_op], feed_dict=feed_dict)
                 prediction = prediction[0][offset-offset_:]
