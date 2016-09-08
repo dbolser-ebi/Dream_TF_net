@@ -1,12 +1,14 @@
 from datareader import *
 from wiggleReader import *
-import threading
 from multiprocessing import Process
+import argparse
+import time
+
 
 def print_num_instances_for_each_chromosome():
     chr_size = {}
     datareader = DataReader('../data/')
-    for idx, instance in enumerate(datareader.generate_cross_celltype('CTCF', ['MCF-7'])):
+    for idx, instance in enumerate(datareader.generate_cross_celltype('train', 'CTCF', ['MCF-7'])):
         (chromosome, start), features, labels = instance
         if chromosome not in chr_size:
             chr_size[chromosome] = 0
@@ -31,36 +33,8 @@ def get_num_bound_lines(amb_as_bound=False):
     print bound
 
 
-def dnase_fold(celltype, left, right):
-    fpath = os.path.join('../data/', 'dnase_fold_coverage/DNASE.%s.fc.signal.bigwig' % celltype)
-    with open(fpath) as fin:
-        fin.read()
-    process = Popen(["wiggletools", "seek", "chr1", str(left), str(right),  fpath],
-                    stdout=PIPE)
-    (wiggle_output, _) = process.communicate()
-    track = np.zeros((right-left+1, ), dtype=np.float32)
-    start = left
-    for line in split_iter(wiggle_output):
-        tokens = line.split()
-        if line.startswith('fixedStep'):
-            start = int(tokens[2].split('=')[1])-left
-        elif line.startswith('chr'):
-            chromosome = tokens[0]
-            start = int(tokens[1])+1-left
-            end = int(tokens[2])
-            value = float(tokens[3])
-            track[start:end] = value
-        else:
-            value = float(tokens[0])
-            track[start] = value
-            start += 1
-    return track
-
-
 def get_DNAse_fold_track(celltype, chromosome, left, right):
     fpath = os.path.join('../data/', 'dnase_fold_coverage/DNASE.%s.fc.signal.bigwig' % celltype)
-    with open(fpath) as fin:
-        fin.read()
     process = Popen(["wiggletools", "seek", chromosome, str(left), str(right), fpath],
                     stdout=PIPE)
     (wiggle_output, _) = process.communicate()
@@ -84,101 +58,130 @@ def get_DNAse_fold_track(celltype, chromosome, left, right):
     return track
 
 
-class DNAseSignalProcessor(threading.Thread):
-    def __init__(self, lines, fout_path, celltype):
-        super(DNAseSignalProcessor, self).__init__()
-        self.lines = lines
-        self.fout_path = fout_path
-        self.celltype = celltype
+def parralelDNAseSignalProcessor(lines, fout_path, celltype, bin_size):
+    bin_correction = max(0, (bin_size - 200) / 2)
 
-    def run(self):
-        with open(self.fout_path, 'w') as fout:
-            for line in split_iter(self.lines):
-                print line
-                tokens = line.split()
-                chromosome = tokens[0]
-                start = int(tokens[1])
-                end = int(tokens[2])
-                track = get_DNAse_fold_track(self.celltype, chromosome, start, end)
-                for i in range(0, track.size - 200, 50):
-                    sbin = track[i:i + 200]
-                    print>>fout, np.max(sbin), np.percentile(sbin, 90), np.mean(sbin)
-
-
-def parralelSignalProcessor(lines, fout_path, celltype):
-    with open(fout_path, 'w') as fout:
+    with gzip.open(fout_path, 'w') as fout:
         for line in split_iter(lines):
-            print line
             tokens = line.split()
             chromosome = tokens[0]
             start = int(tokens[1])
             end = int(tokens[2])
-            track = get_DNAse_fold_track(celltype, chromosome, start, end)
-            for i in range(0, track.size - 200, 50):
-                sbin = track[i:i + 200]
-                print>> fout, np.max(sbin), np.percentile(sbin, 90), np.mean(sbin)
+            track = get_DNAse_fold_track(celltype, chromosome, start-bin_correction, end+bin_correction)
+
+            for i in range(start, end - 200 + 1, 50):
+                sbin = track[i-start:i-start+bin_size]
+                assert(len(sbin) == bin_size)
+                num_bins = bin_size/10
+                bins = np.split(sbin, num_bins)
+                print>> fout, np.max(sbin), np.percentile(sbin, 90), np.mean(sbin),
+                for j in bins:
+                    print >>fout, np.mean(j),
+                print>>fout
 
 
-def preprocess_dnase():
+def preprocess_dnase(num_jobs, bin_size):
     reader = DataReader('../data/')
-    num_train_instances = 51676736
-    threads = []
     processes = []
 
     celltypes = reader.get_celltypes()
-    print celltypes, len(celltypes)
 
-    with open('../data/annotations/train_regions.blacklistfiltered.merged.bed') as fin:
-        lines = fin.read()
+    for part in ['train', 'ladder', 'test']:
 
-    for celltype in celltypes:
-        def process_dnase(fin, fout):
-            for line in fin:
-                tokens = line.split()
-                chromosome = tokens[0]
-                start = int(tokens[1])
-                end = int(tokens[2])
-                track = get_DNAse_fold_track(celltype, chromosome, start, end)
-                for i in range(0, track.size-200, 50):
-                    sbin = track[i:i+200]
-                    print >>fout, np.max(sbin), np.percentile(sbin, 90), np.mean(sbin)
+        with open('../data/annotations/%s_regions.blacklistfiltered.merged.bed' % part) as fin:
+            lines = fin.read()
 
-        if not os.path.exists('../data/preprocess/DNASE_FEATURES/%s_train.txt' % celltype):
-            fout_path = '../data/preprocess/DNASE_FEATURES/%s_train.txt' % celltype
-            '''
-            threads.append(DNAseSignalProcessor(lines,
-                                                    ,
-                                                    celltype))
-            '''
-            processes.append(Process(target=parralelSignalProcessor, args=(lines, fout_path, celltype,)))
-                    #process_dnase(fin, fout)
-        '''
-        if not os.path.exists('../data/preprocess/DNASE_FEATURES/%s_ladder.txt' % celltype):
-            with open('../data/preprocess/DNASE_FEATURES/%s_ladder.txt' % celltype, 'w') as fout:
-                #process_dnase(fin, fout)
-                threads.append(DNAseSignalProcessor('../data/annotations/ladder_regions.blacklistfiltered.merged.bed', fout, celltype))
+        for celltype in celltypes:
 
-        if not os.path.exists('../data/preprocess/DNASE_FEATURES/%s_test.txt' % celltype):
-            with open('../data/preprocess/DNASE_FEATURES/%s_test.txt' % celltype, 'w') as fout:
-                #process_dnase(fin, fout)
-                threads.append(DNAseSignalProcessor('../data/annotations/test_regions.blacklistfiltered.merged.bed', fout, celltype))
-        '''
-    '''
-    num_simul_threads = 14
-    for i in range(0, len(threads), num_simul_threads):
-        map(lambda x: x.start(), threads[i:i+num_simul_threads])
-        map(lambda x: x.join(), threads[i:i+num_simul_threads])
-    '''
-    num_processes = 14
+            if not os.path.exists('../data/preprocess/DNASE_FEATURES/%s_%s_%d.txt' % (celltype, part, bin_size)):
+                fout_path = '../data/preprocess/DNASE_FEATURES/%s_%s_%d.gz' % (celltype, part, bin_size)
+                processes.append(
+                    Process(
+                        target=parralelDNAseSignalProcessor,
+                        args=(lines, fout_path, celltype, bin_size)))
+
+    num_processes = num_jobs
     for i in range(0, len(processes), num_processes):
         map(lambda x: x.start(), processes[i:i + num_processes])
         map(lambda x: x.join(), processes[i:i + num_processes])
 
 
+def get_ChIPSeq_fold_track(celltype, transcription_factor,  chromosome, left, right):
+    fpath = os.path.join('../data/', 'ChIPseq.%s.%s.fc.signal.train.bw ' % (celltype, transcription_factor))
+    process = Popen(["wiggletools", "seek", chromosome, str(left), str(right), fpath],
+                    stdout=PIPE)
+    (wiggle_output, _) = process.communicate()
+    track = np.zeros((right - left + 1,), dtype=np.float32)
+    position = 0
+    for line in split_iter(wiggle_output):
+        tokens = line.split()
+        if line.startswith('fixedStep'):
+            continue
+        elif line.startswith('chr'):
+            start = int(tokens[1]) + 1
+            end = int(tokens[2])
+            length = end-start+1
+            value = float(tokens[3])
+            track[position:position+length] = value
+            position += length
+        else:
+            value = float(tokens[0])
+            track[position] = value
+            position += 1
+    return track
+
+
+def parralelChIPSeqSignalProcessor(lines, fout_path, celltype, transcription_factor):
+    with gzip.open(fout_path, 'w') as fout:
+        for line in split_iter(lines):
+            tokens = line.split()
+            chromosome = tokens[0]
+            start = int(tokens[1])
+            end = int(tokens[2])
+            track = get_ChIPSeq_fold_track(celltype, transcription_factor, chromosome, start, end)
+            for i in range(0, track.size - 200, 50):
+                sbin = track[i:i + 200]
+                print>> fout, np.mean(sbin)
+
+
+def preprocess_chipseq(num_jobs, bin_size):
+    reader = DataReader('../data/')
+    processes = []
+
+    celltypes = reader.get_celltypes()
+    transcription_factors = reader.get_tfs()
+
+    for part in ['train']:
+        with open('../data/annotations/%s_regions.blacklistfiltered.merged.bed' % part) as fin:
+            lines = fin.read()
+
+        for celltype in celltypes:
+            for transcription_factor in transcription_factors:
+                if not os.path.exists('../data/preprocess/CHIPSEQ_FEATURES/%s_%s_%s.txt' %
+                                     (celltype, transcription_factor, part)):
+                    fout_path = '../data/preprocess/CHIPSEQ_FEATURES/%s_%s_%s.gz' % (celltype, transcription_factor, part)
+                    processes.append(
+                        Process(target=parralelChIPSeqSignalProcessor,
+                                args=(lines, fout_path, celltype, transcription_factor)))
+
+    num_processes = num_jobs
+    for i in range(0, len(processes), num_processes):
+        map(lambda x: x.start(), processes[i:i + num_processes])
+        map(lambda x: x.join(), processes[i:i + num_processes])
+
 if __name__ == '__main__':
-    #print print_num_instances_for_each_chromosome()
-    #read_structure_features()
-    #get_num_bound_lines(True)
-    #print dnase_fold('A549', 10600, 11000)
-    preprocess_dnase()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dnase', action='store_true', required=False)
+    parser.add_argument('--chipseq', action='store_true', required=False)
+    parser.add_argument('--num_jobs', '-nj', help="number of cores to use", required=True)
+    parser.add_argument('--bin_size', '-bs', help="bin size", required=False)
+    args = parser.parse_args()
+    bin_size = 200 if args.bin_size is None else int(args.bin_size)
+    bin_size = max(200, bin_size)
+    bin_size -= bin_size % 2
+
+    if args.dnase:
+        preprocess_dnase(int(args.num_jobs), bin_size)
+    if args.chipseq:
+        preprocess_chipseq(int(args.num_jobs), bin_size)
 

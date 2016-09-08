@@ -1,10 +1,7 @@
 import argparse
 from subprocess import call, Popen, PIPE
 import re
-import numpy as np
 from os import remove
-from bx.intervals.io import GenomicIntervalReader
-from bx.bbi.bigwig_file import BigWigFile
 
 
 # Low mem overhead splitting
@@ -68,10 +65,6 @@ def get_wiggle_statistics(fpath):
 
 def get_signal_from_wiggle(fpath):
     return
-
-
-def get_peaks_from_bigBed(path_to_bigBed):
-    bw = BigWigFile.open(path_to_bigBed)
 
 def get_peaks_from_bed(path_to_bed, path_to_wiggle):
     sorted_path = path_to_bed+'.sorted'

@@ -4,17 +4,18 @@ from sklearn.cross_validation import StratifiedKFold
 import time
 from datareader import DataReader
 from tensorflow.contrib.layers.python.layers import *
-from sys import stdout
 
 
-class configuration():
+class configuration:
     SEQ = 1
     SEQ_SHAPE = 2
     SEQ_SHAPE_GENEXPR = 3
     SEQ_SHAPE_GENEXPR_ALLUSUAL = 4
-    SEQ_SHAPE_GENEXPR_SPECIFICUSUAL = 5
+    SEQ_SHAPE_SPECIFICUSUAL = 5
     SEQ_SHAPE_GENEXPR_ALLUSUAL_DNASE = 6
     SEQ_DNASE = 7
+    SEQ_DNASE_SHAPE = 8
+    SEQ_DNASE_SHAPE_ALLUSUAL = 9
 
 
 class bcolors:
@@ -53,6 +54,11 @@ def calc_loss(logits, labels):
     return tf.reduce_mean(entropies)
 
 
+def calc_regression_loss(prediction, actual):
+    mse = tf.reduce_mean(tf.square(tf.sub(prediction, actual)))
+    return mse
+
+
 class EarlyStopping:
     def __init__(self, max_stalls):
         self.best_loss = 100
@@ -74,12 +80,14 @@ class EarlyStopping:
 class ConvNet:
     def __init__(self, model_dir, batch_size=256, num_channels=4, num_epochs=2,
                  sequence_width=200, num_outputs=1, eval_size=0.2, early_stopping=100,
-                 num_gen_expr_features=57820, num_shape_features=1, dropout_rate=.5,
-                 config=1, verbose=True, datapath ='../data/', transcription_factor='CTCF'):
+                 num_gen_expr_features=57820, num_dnase_features=4, num_shape_features=4, dropout_rate=.5,
+                 config=1, verbose=True, datapath ='../data/', transcription_factor='CTCF', regression=False):
         if config is None:
             config = 1
+        self.regression = regression
         self.datareader = DataReader(datapath)
         self.config = config
+        self.num_dnase_features = num_dnase_features
         self.num_outputs = num_outputs
         self.num_channels = num_channels
         self.num_shape_features = num_shape_features
@@ -92,7 +100,7 @@ class ConvNet:
         self.verbose = verbose
         self.num_genexpr_features = num_gen_expr_features
         self.tf_gene_expression = tf.placeholder(tf.float32, shape=(1, num_gen_expr_features), name='tpm_values')
-        self.tf_dnase_features = tf.placeholder(tf.float32, shape=(batch_size, 4), name='dnase_features')
+        self.tf_dnase_features = tf.placeholder(tf.float32, shape=(batch_size, num_dnase_features), name='dnase_features')
         self.tf_shape = tf.placeholder(tf.float32, shape=(batch_size, self.height,
                                                           sequence_width, num_shape_features), name='shapes')
         self.tf_sequence = tf.placeholder(tf.float32, shape=(batch_size, self.height,
@@ -110,12 +118,12 @@ class ConvNet:
 
     def get_model(self):
         with tf.variable_scope('DNASE') as scope:
-            dnase_features = self.tf_dnase_features
+            dnase_features = batch_norm(self.tf_dnase_features)
 
         with tf.variable_scope('USUAL_SUSPECTS') as scope:
             activations = []
             for transcription_factor in self.datareader.get_tfs():
-                if int(self.config) == int(configuration.SEQ_SHAPE_GENEXPR_SPECIFICUSUAL) \
+                if int(self.config) == int(configuration.SEQ_SHAPE_SPECIFICUSUAL) \
                         and transcription_factor != self.transcription_factor:
                     continue
                 motifs = self.datareader.get_motifs_h(transcription_factor)
@@ -167,7 +175,6 @@ class ConvNet:
                 flattened = flatten(pool)
                 drop_shape = fully_connected(flattened, 100)
 
-
         with tf.variable_scope('R_MOTIF') as scope:
             with tf.variable_scope('conv15_15') as convscope:
                 depth = 30
@@ -196,12 +203,16 @@ class ConvNet:
                     merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr])
                 elif self.config == int(configuration.SEQ_SHAPE_GENEXPR_ALLUSUAL):
                     merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr, drop_usual])
-                elif self.config == int(configuration.SEQ_SHAPE_GENEXPR_SPECIFICUSUAL):
-                    merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr, drop_usual])
+                elif self.config == int(configuration.SEQ_SHAPE_SPECIFICUSUAL):
+                    merged = tf.concat(1, [drop_rmotif, drop_shape, drop_usual])
                 elif self.config == int(configuration.SEQ_SHAPE_GENEXPR_ALLUSUAL_DNASE):
                     merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr, drop_usual, dnase_features])
                 elif self.config == int(configuration.SEQ_DNASE):
                     merged = tf.concat(1, [drop_rmotif, dnase_features])
+                elif self.config == int(configuration.SEQ_DNASE_SHAPE):
+                    merged = tf.concat(1, [drop_rmotif, dnase_features, drop_shape])
+                elif self.config == int(configuration.SEQ_DNASE_SHAPE_ALLUSUAL):
+                    merged = tf.concat(1, [drop_rmotif, dnase_features, drop_shape, drop_usual])
 
             with tf.variable_scope('fc') as fcscope:
                 activation = fully_connected(merged, 1000)
@@ -218,10 +229,12 @@ class ConvNet:
         return logits, merged_summary
 
     def fit(self, X, y, S=None, gene_expression=None, da=None):
-
         summary_writer = tf.train.SummaryWriter(self.model_dir + 'train')
         try:
-            loss = calc_loss(self.logits, self.tf_train_labels)
+            if self.regression:
+                loss = calc_regression_loss(self.logits, self.tf_train_labels)
+            else:
+                loss = calc_loss(self.logits, self.tf_train_labels)
             optimizer = tf.train.AdamOptimizer(learning_rate=0.001, beta1=0.9, beta2=0.999).minimize(loss)
 
             saver = tf.train.Saver()
@@ -272,7 +285,7 @@ class ConvNet:
                             batch_shapes = np.reshape(S_train[offset:end, :],
                                                       (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
                             batch_labels = np.reshape(y_train[offset:end, celltype_idx], (self.batch_size, 1))
-                            batch_dnase_features = np.reshape(da_train[offset:end, :, celltype_idx], (self.batch_size, 4))
+                            batch_dnase_features = np.reshape(da_train[offset:end, :, celltype_idx], (self.batch_size, self.num_dnase_features))
                             feed_dict = {self.tf_sequence: batch_sequence,
                                          self.tf_shape: batch_shapes,
                                          self.tf_train_labels: batch_labels,
@@ -282,21 +295,6 @@ class ConvNet:
                                          self.keep_prob: 1-self.dropout_rate,
                                          self.tf_dnase_features: batch_dnase_features
                                          }
-                            '''
-                            if np.random.rand() <= 0.9 or celltype_idx != 0:
-                                _, r_loss = session.run([optimizer, loss], feed_dict=feed_dict)
-                            else:
-                                run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-                                run_metadata = tf.RunMetadata()
-
-                                summary, _, r_loss = session.run([self.summary_op, optimizer, loss],
-                                                                 feed_dict=feed_dict,
-                                                                 options=run_options,
-                                                                 run_metadata=run_metadata)
-                                if self.model_dir is not None:
-                                    summary_writer.add_summary(summary)
-                                    summary_writer.add_run_metadata(run_metadata, 'Epoch %d, offset %d' % (epoch, offset))
-                            '''
                             summary, _, r_loss = session.run([self.summary_op, optimizer, loss], feed_dict=feed_dict)
                             if self.model_dir is not None:
                                 summary_writer.add_summary(summary)
@@ -308,7 +306,10 @@ class ConvNet:
                     accuracies = []
                     losses = []
                     num_examples = X_val.shape[0]
-                    prediction_op = tf.nn.sigmoid(self.logits)
+                    if self.regression:
+                        prediction_op = clip_ops.clip_by_value(self.logits, 0, 1)
+                    else:
+                        prediction_op = tf.nn.sigmoid(self.logits)
                     for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
                         end = min(offset+self.batch_size, num_examples)
                         for celltype_idx in xrange(y.shape[1]):
@@ -317,7 +318,7 @@ class ConvNet:
                             batch_shapes = np.reshape(S_val[offset:end, :],
                                                       (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
                             batch_labels = np.reshape(y_val[offset:end, celltype_idx], (self.batch_size, 1))
-                            batch_dnase_features = np.reshape(da_val[offset:end, :, celltype_idx], (self.batch_size, 4))
+                            batch_dnase_features = np.reshape(da_val[offset:end, :, celltype_idx], (self.batch_size, self.num_dnase_features))
                             feed_dict = {self.tf_sequence: batch_sequence,
                                          self.tf_shape: batch_shapes,
                                          self.tf_train_labels: batch_labels,
@@ -358,7 +359,10 @@ class ConvNet:
         Run trained model
         :return: predictions
         '''
-        prediction_op = tf.nn.sigmoid(self.logits)
+        if self.regression:
+            prediction_op = clip_ops.clip_by_value(self.logits, 0, 1)
+        else:
+            prediction_op = tf.nn.sigmoid(self.logits)
         num_examples = X.shape[0]
         saver = tf.train.Saver()
         predictions = []
@@ -373,7 +377,7 @@ class ConvNet:
                                           (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
 
                 batch_da_features = np.reshape(da[offset_:end, :, 0],
-                                      (self.batch_size, 4))
+                                      (self.batch_size, self.num_dnase_features))
                 feed_dict = {self.tf_sequence: batch_sequence,
                              self.tf_shape: batch_shapes,
                              self.tf_gene_expression:

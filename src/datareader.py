@@ -488,7 +488,7 @@ class DataReader:
             dnase_lists.append(l)
         return dnase_lists
 
-    def generate_cross_celltype(self, transcription_factor, celltypes, options=[],
+    def generate_cross_celltype(self, part, transcription_factor, celltypes, options=[],
                                 unbound_fraction=1, ambiguous_as_bound=False,
                                 bin_size=200):
         position_tree = set()  # keeps track of which lines (chr, start) to include
@@ -555,7 +555,7 @@ class DataReader:
 
             dnase_feature_handlers = []
             for celltype in celltypes:
-                f = open(os.path.join(self.datapath, 'preprocess/DNASE_FEATURES/%s_train.txt' % celltype))
+                f = gzip.open(os.path.join(self.datapath, 'preprocess/DNASE_FEATURES/%s_%s_%d.txt' % (celltype, part, bin_size)))
                 dnase_feature_handlers.append(f)
 
             for l_idx, line in enumerate(fin):
@@ -613,6 +613,5 @@ class DataReader:
 
 if __name__ == '__main__':
     datareader = DataReader('../data/')
-    out = datareader.get_shape_features('chr10')
-    print out.shape
+    print len(datareader.get_tfs())
 
