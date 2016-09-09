@@ -1,8 +1,8 @@
 from datareader import *
-from wiggleReader import *
 from multiprocessing import Process
 import argparse
-import time
+from subprocess import Popen, PIPE
+from sklearn.preprocessing import MinMaxScaler
 
 
 def print_num_instances_for_each_chromosome():
@@ -106,8 +106,31 @@ def preprocess_dnase(num_jobs, bin_size):
         map(lambda x: x.join(), processes[i:i + num_processes])
 
 
+def parallel_normalize_chipseq(fpath):
+    a = np.loadtxt(fpath, dtype=np.float32)
+    a = MinMaxScaler().fit_transform(a.reshape(-1, 1))
+    with gzip.open(fpath, 'w') as fout:
+        for i in np.nditer(a):
+            print >>fout, i
+
+
+def normalize_chipseq(num_jobs):
+    dir_path = '../data/preprocess/CHIPSEQ_FEATURES/'
+    processes = []
+    for fname in os.listdir(dir_path):
+        fpath = os.path.join(dir_path, fname)
+        processes.append(Process(
+            target=parallel_normalize_chipseq,
+            args=(fpath,)
+        ))
+    for i in range(0, len(processes), num_jobs):
+        map(lambda x: x.start(), processes[i:i + num_jobs])
+        map(lambda x: x.join(), processes[i:i + num_jobs])
+
+
+
 def get_ChIPSeq_fold_track(celltype, transcription_factor,  chromosome, left, right):
-    fpath = os.path.join('../data/', 'ChIPseq.%s.%s.fc.signal.train.bw ' % (celltype, transcription_factor))
+    fpath = os.path.join('../data/', 'chipseq_fold_change_signal/ChIPseq.%s.%s.fc.signal.train.bw' % (celltype, transcription_factor))
     process = Popen(["wiggletools", "seek", chromosome, str(left), str(right), fpath],
                     stdout=PIPE)
     (wiggle_output, _) = process.communicate()
@@ -131,16 +154,19 @@ def get_ChIPSeq_fold_track(celltype, transcription_factor,  chromosome, left, ri
     return track
 
 
-def parralelChIPSeqSignalProcessor(lines, fout_path, celltype, transcription_factor):
+def parralelChIPSeqSignalProcessor(lines, fout_path, celltype, transcription_factor, bin_size):
+    bin_correction = max(0, (bin_size - 200) / 2)
     with gzip.open(fout_path, 'w') as fout:
         for line in split_iter(lines):
             tokens = line.split()
             chromosome = tokens[0]
             start = int(tokens[1])
             end = int(tokens[2])
-            track = get_ChIPSeq_fold_track(celltype, transcription_factor, chromosome, start, end)
-            for i in range(0, track.size - 200, 50):
-                sbin = track[i:i + 200]
+            track = get_ChIPSeq_fold_track(celltype, transcription_factor, chromosome,
+                                           start-bin_correction, end+bin_correction)
+            for i in range(start, end - 200 + 1, 50):
+                sbin = track[i-start:i - start + bin_size]
+                assert(len(sbin) == bin_size)
                 print>> fout, np.mean(sbin)
 
 
@@ -157,19 +183,19 @@ def preprocess_chipseq(num_jobs, bin_size):
 
         for celltype in celltypes:
             for transcription_factor in transcription_factors:
-                if not os.path.exists('../data/preprocess/CHIPSEQ_FEATURES/%s_%s_%s.txt' %
-                                     (celltype, transcription_factor, part)):
-                    fout_path = '../data/preprocess/CHIPSEQ_FEATURES/%s_%s_%s.gz' % (celltype, transcription_factor, part)
+                fout_path = '../data/preprocess/CHIPSEQ_FEATURES/%s_%s_%d.gz' % (
+                                    celltype, transcription_factor, bin_size)
+                if not os.path.exists(fout_path):
                     processes.append(
                         Process(target=parralelChIPSeqSignalProcessor,
-                                args=(lines, fout_path, celltype, transcription_factor)))
+                                args=(lines, fout_path, celltype, transcription_factor, bin_size)))
 
-    num_processes = num_jobs
-    for i in range(0, len(processes), num_processes):
-        map(lambda x: x.start(), processes[i:i + num_processes])
-        map(lambda x: x.join(), processes[i:i + num_processes])
+    for i in range(0, len(processes), num_jobs):
+        map(lambda x: x.start(), processes[i:i + num_jobs])
+        map(lambda x: x.join(), processes[i:i + num_jobs])
 
 if __name__ == '__main__':
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--dnase', action='store_true', required=False)
     parser.add_argument('--chipseq', action='store_true', required=False)
@@ -179,9 +205,12 @@ if __name__ == '__main__':
     bin_size = 200 if args.bin_size is None else int(args.bin_size)
     bin_size = max(200, bin_size)
     bin_size -= bin_size % 2
+    num_jobs = int(args.num_jobs)
 
     if args.dnase:
-        preprocess_dnase(int(args.num_jobs), bin_size)
+        preprocess_dnase(num_jobs, bin_size)
     if args.chipseq:
-        preprocess_chipseq(int(args.num_jobs), bin_size)
+        preprocess_chipseq(num_jobs, bin_size)
+        normalize_chipseq(num_jobs)
+
 

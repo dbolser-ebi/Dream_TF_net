@@ -11,7 +11,7 @@ def split_iter(string):
 
 def get_wiggle_output(fpath):
     # Call wiggletools
-    process = Popen(["wiggletools", fpath],
+    process = Popen(["wiggletools", "seek", "chr10", "1000", "2000", fpath],
                     stdout=PIPE)
     (output, _) = process.communicate()
     return output
@@ -100,13 +100,8 @@ def get_peaks_from_bed(path_to_bed, path_to_wiggle):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--bigWig', help='input bigwig path', required=True)
-    parser.add_argument('--bigBed', help='input bigbed path', required=False)
-    args = parser.parse_args()
-    #(chromosomes, chr_range, read, missing, continuous_regions) = get_wiggle_statistics(args.bigWig)
-    #print read, missing, continuous_regions
-    get_peaks_from_bed(args.bigBed, args.bigWig)
+    a = get_wiggle_output('../data/chipseq_fold_change_signal/ChIPseq.HepG2.YY1.fc.signal.train.bw')
+    print a
 
 if __name__ == '__main__':
     main()
