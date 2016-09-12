@@ -183,6 +183,9 @@ def preprocess_chipseq(num_jobs, bin_size):
 
         for celltype in celltypes:
             for transcription_factor in transcription_factors:
+                if not os.path.exists('../data/chipseq_fold_change_signal/ChIPseq.%s.%s.fc.signal.train.bw'
+                                      % (celltype, transcription_factor)):
+                    continue
                 fout_path = '../data/preprocess/CHIPSEQ_FEATURES/%s_%s_%d.gz' % (
                                     celltype, transcription_factor, bin_size)
                 if not os.path.exists(fout_path):
