@@ -475,7 +475,7 @@ class Evaluator:
                                                                 regression=self.regression):
 
             (chromosome, start), sequence, shape_features, dnase_features, label = instance
-            if test_chromosomes[-1] < chromosome:
+            if test_chromosomes[-1] < chromosome and curr_chr == '-1':
                 break
 
             if curr_chr == '-1' and chromosome in test_chromosomes:
