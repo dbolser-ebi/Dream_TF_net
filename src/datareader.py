@@ -488,7 +488,7 @@ class DataReader:
             dnase_lists.append(l)
         return dnase_lists
 
-    def generate_cross_celltype(self, part, transcription_factor, celltypes, options=[],
+    def generate_cross_celltype(self, part, transcription_factor, celltypes, num_dnase_features, options=[],
                                 unbound_fraction=1, ambiguous_as_bound=False,
                                 bin_size=200, regression=False):
         position_tree = set()  # keeps track of which lines (chr, start) to include
@@ -596,10 +596,10 @@ class DataReader:
                                 dnase_labels[:, c_idx] = 1
 
                     # dnase fold coverage
-                    dnase_fold_coverage = np.zeros((1+3+bin_size/10, len(celltypes)), dtype=np.float32)
+                    dnase_fold_coverage = np.zeros((num_dnase_features, len(celltypes)), dtype=np.float32)
 
                     for c_idx, celltype in enumerate(celltypes):
-                        tokens = map(float, dnase_feature_lines[c_idx].split())
+                        tokens = map(float, dnase_feature_lines[c_idx].split())[:num_dnase_features-1]
                         dnase_fold_coverage[0, c_idx] = dnase_labels[0, c_idx]
                         #for t_idx, token in enumerate(tokens):
                         #    dnase_fold_coverage[t_idx+1, c_idx] = token

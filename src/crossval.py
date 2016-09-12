@@ -6,10 +6,15 @@ import sqlite3
 from progress.bar import Bar
 
 
+def finish_bar(bar):
+    if bar is not None:
+        bar.finish()
+
+
 class Evaluator:
 
-    def __init__(self, datapath, bin_size=200, ambiguous_as_bound=False, regression=False):
-        self.num_dnase_features = 1+3+bin_size/10
+    def __init__(self, datapath, bin_size=200, ambiguous_as_bound=False, regression=False, show_progress=True, num_dnase_features=4):
+        self.num_dnase_features = num_dnase_features
         self.num_train_instances = 51676736
         self.num_tf = 32
         self.num_celltypes = 14
@@ -19,6 +24,7 @@ class Evaluator:
         self.bin_size = bin_size
         self.ambiguous_as_bound = ambiguous_as_bound
         self.regression = regression
+        self.show_progress = show_progress
 
     def print_results(self, y_test, y_pred):
         TP = 0
@@ -245,7 +251,8 @@ class Evaluator:
 
             for idx, instance in enumerate(self.datareader.generate_cross_celltype(part, transcription_factor,
                                                                                    celltypes,
-                                                                                   [CrossvalOptions.balance_peaks],
+                                                                                   self.num_dnase_features,
+                                                                                   options=[CrossvalOptions.balance_peaks],
                                                                                    unbound_fraction=unbound_fraction,
                                                                                    ambiguous_as_bound=self.ambiguous_as_bound,
                                                                                    bin_size=self.bin_size,
@@ -394,11 +401,13 @@ class Evaluator:
             da_train = self.get_da_train(model, self.num_train_instances, len(celltypes_train), self.num_dnase_features)
             da_train_val = np.zeros((self.num_train_instances, self.num_dnase_features, 1), dtype=np.float32)
 
-            bar = Bar('Loading train set', fill='#', suffix='%(percent)d%%', max=self.num_train_instances)
+            if self.show_progress:
+                bar = Bar('Loading train set', fill='#', suffix='%(percent)d%%', max=self.num_train_instances)
 
             for idx, instance in enumerate(self.datareader.generate_cross_celltype('train', transcription_factor,
                                            celltypes,
-                                           [CrossvalOptions.balance_peaks],
+                                            self.num_dnase_features,
+                                           options=[CrossvalOptions.balance_peaks],
                                             unbound_fraction=unbound_fraction,
                                             ambiguous_as_bound=self.ambiguous_as_bound,
                                             bin_size=self.bin_size,
@@ -411,9 +420,11 @@ class Evaluator:
                 da_train_val[idx, :, :] = np.reshape(dnase_features[:, -1], (self.num_dnase_features, 1))
                 y_train[idx] = self.get_y_train_data(model, labels)
                 y_train_val[idx] = labels.flatten()[-1]
-                bar.next()
+                if self.show_progress:
+                    bar.next()
 
-            bar.finish()
+            if self.show_progress:
+                bar.finish()
 
             if save_train_set:
                 self.save_model(X_train, S_train,
@@ -448,10 +459,6 @@ class Evaluator:
         bar = None
         idx = 0
 
-        def finish_bar(bar):
-            if bar is not None:
-                bar.finish()
-
         tot_num_test_instances = reduce(lambda x, y: self.datareader.get_num_instances(y)+x, test_chromosomes, 0)
         if isinstance(model, ConvNet):
             y_tot_test = np.zeros((tot_num_test_instances,), dtype=np.float32)
@@ -462,7 +469,9 @@ class Evaluator:
         t_idx = 0
 
         for instance in self.datareader.generate_cross_celltype('train', transcription_factor,
-                                                                [celltypes_test], bin_size=self.bin_size,
+                                                                [celltypes_test],
+                                                                num_dnase_features=self.num_dnase_features,
+                                                                bin_size=self.bin_size,
                                                                 regression=self.regression):
 
             (chromosome, start), sequence, shape_features, dnase_features, label = instance
@@ -470,18 +479,20 @@ class Evaluator:
                 break
 
             if curr_chr == '-1' and chromosome in test_chromosomes:
-                finish_bar(bar)
+
                 curr_chr = chromosome
                 self.num_test_instances = self.datareader.get_num_instances(chromosome)
                 X_test = self.get_X(model, self.num_test_instances, self.bin_size)
                 S_test = self.get_S(model, self.num_test_instances, self.bin_size)
                 y_test = self.get_y_test(model, self.num_test_instances)
                 da_test = self.get_da_test(model, self.num_test_instances, self.num_dnase_features)
-                bar = Bar('Loading chromosome %s' % curr_chr, fill='#', suffix='%(percent)d%%', max=self.num_test_instances)
+                if self.show_progress:
+                    finish_bar(bar)
+                    bar = Bar('Loading chromosome %s' % curr_chr, fill='#', suffix='%(percent)d%%', max=self.num_test_instances)
                 idx = 0
 
             elif curr_chr != chromosome and chromosome in test_chromosomes:
-                finish_bar(bar)
+
                 print 'Results for test', curr_chr
                 print 'num test instances', self.num_test_instances
                 y_pred = model.predict(X_test, S_test, gene_expression_features, da_test)
@@ -496,7 +507,9 @@ class Evaluator:
                 S_test = self.get_S(model, self.num_test_instances, self.bin_size)
                 y_test = self.get_y_test(model, self.num_test_instances)
                 da_test = self.get_da_test(model, self.num_test_instances, self.num_dnase_features)
-                bar = Bar('Loading chromosome %s' % curr_chr, fill='#', suffix='%(percent)d%%', max=self.num_test_instances)
+                if self.show_progress:
+                    finish_bar(bar)
+                    bar = Bar('Loading chromosome %s' % curr_chr, fill='#', suffix='%(percent)d%%', max=self.num_test_instances)
                 idx = 0
 
             elif curr_chr != '-1' and curr_chr != chromosome:
@@ -516,8 +529,9 @@ class Evaluator:
                 y_test[idx] = label
                 X_test[idx] = self.get_X_data(model, sequence)
                 S_test[idx] = self.get_S_data(model, shape_features, self.bin_size)
-                da_test[idx, :, :] = dnase_features
-                bar.next()
+                da_test[idx] = dnase_features
+                if self.show_progress:
+                    bar.next()
                 idx += 1
 
         print "Overall test results"
@@ -539,6 +553,7 @@ if __name__ == '__main__':
     parser.add_argument('--ambiguous_bound', '-ab', action='store_true', help='treat ambiguous as bound', required=False)
     parser.add_argument('--bin_size', '-bs', help='Sequence bin size (must be an even number >= 200)', required=False)
     parser.add_argument('--regression', '-reg', help='Use the chipseq signal strength as targets', action='store_true', required=False)
+    parser.add_argument('--show_progress', '-sp', help="show progress in progress bar", action='store_true', required=False)
     args = parser.parse_args()
     model = None
 
@@ -547,11 +562,13 @@ if __name__ == '__main__':
     bin_size = int(200 if args.bin_size is None else args.bin_size)
     bin_size -= bin_size % 2
 
+    num_dnase_features = 1+3+bin_size/10
+
     if args.model == 'TFC':
         model = ConvNet('../log/', num_epochs=num_epochs, batch_size=512,
                         num_gen_expr_features=32, config=config, dropout_rate=0.25,
                         eval_size=0.2, num_shape_features=4, sequence_width=bin_size,
-                        num_dnase_features=1+3+bin_size/10)
+                        num_dnase_features=num_dnase_features)
 
     else:
         print "Model options: TFC (TensorFlow Convnet)"
@@ -563,7 +580,9 @@ if __name__ == '__main__':
 
     if model is not None:
         transcription_factors = args.transcription_factors.split(',')
-        evaluator = Evaluator('../data/', bin_size=bin_size, ambiguous_as_bound=args.ambiguous_bound, regression=args.regression)
+        evaluator = Evaluator('../data/', bin_size=bin_size,
+                              ambiguous_as_bound=args.ambiguous_bound, regression=args.regression,
+                              show_progress=args.show_progress, num_dnase_features=num_dnase_features)
         for transcription_factor in transcription_factors:
             if args.validate:
                 evaluator.run_cross_cell_benchmark(model, transcription_factor, save_train_set=True,

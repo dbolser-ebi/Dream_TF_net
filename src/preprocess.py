@@ -71,7 +71,6 @@ def parralelDNAseSignalProcessor(lines, fout_path, celltype, bin_size):
 
             for i in range(start, end - 200 + 1, 50):
                 sbin = track[i-start:i-start+bin_size]
-                assert(len(sbin) == bin_size)
                 num_bins = bin_size/10
                 bins = np.split(sbin, num_bins)
                 print>> fout, np.max(sbin), np.percentile(sbin, 90), np.mean(sbin),

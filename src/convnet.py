@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-from sklearn.cross_validation import StratifiedKFold
+from sklearn.cross_validation import StratifiedKFold, KFold
 import time
 from datareader import DataReader
 from tensorflow.contrib.layers.python.layers import *
@@ -110,7 +110,6 @@ class ConvNet:
         self.early_stopping = EarlyStopping(max_stalls=early_stopping)
         self.dropout_rate = dropout_rate
         self.transcription_factor = transcription_factor
-
         self.logits, self.summary_op = self.get_model()
 
     def set_transcription_factor(self, transcription_factor):
@@ -118,7 +117,7 @@ class ConvNet:
 
     def get_model(self):
         with tf.variable_scope('DNASE') as scope:
-            dnase_features = batch_norm(self.tf_dnase_features)
+            dnase_features = self.tf_dnase_features
 
         with tf.variable_scope('USUAL_SUSPECTS') as scope:
             activations = []
@@ -239,8 +238,11 @@ class ConvNet:
 
             saver = tf.train.Saver()
 
-            y_ = np.max(y, axis=1)
-            kf = StratifiedKFold(y_, round(1. / self.eval_size))
+            if self.regression:
+                kf = KFold(y.size, round(1. / self.eval_size))
+            else:
+                y_ = np.max(y, axis=1)
+                kf = StratifiedKFold(y_, round(1. / self.eval_size))
             train_indices, valid_indices = next(iter(kf))
 
             X_train = X[train_indices]
@@ -337,7 +339,9 @@ class ConvNet:
                     early_score = self.early_stopping.update(v_loss)
                     if early_score == 2:
                         # Use the best model on validation
-                        saver.save(session, self.model_dir + 'conv%s%d.ckpt' % (self.transcription_factor, self.config))
+                        saver.save(session, self.model_dir + 'conv%s%d%d%d.ckpt'
+                                   % (self.transcription_factor, self.config,
+                                      self.num_dnase_features, self.sequence_width))
                         if self.verbose:
                             print (bcolors.OKCYAN+"%d\t%f\t%f\t%.2f%%\t\t%ds"+bcolors.ENDC) % \
                                   (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
@@ -367,7 +371,9 @@ class ConvNet:
         saver = tf.train.Saver()
         predictions = []
         with tf.Session() as session:
-            saver.restore(session, self.model_dir+'conv%s%d.ckpt' % (self.transcription_factor, self.config))
+            saver.restore(session, self.model_dir+'conv%s%d%d%d.ckpt'
+                          % (self.transcription_factor, self.config,
+                             self.num_dnase_features, self.sequence_width))
             for offset in xrange(0, num_examples, self.batch_size):
                 end = min(offset + self.batch_size, num_examples)
                 offset_ = offset - (self.batch_size-(end-offset))
