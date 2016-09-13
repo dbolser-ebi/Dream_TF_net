@@ -121,10 +121,9 @@ class ConvNet:
 
         with tf.variable_scope('USUAL_SUSPECTS') as scope:
             activations = []
-            for transcription_factor in self.datareader.get_tfs():
-                if int(self.config) == int(configuration.SEQ_SHAPE_SPECIFICUSUAL) \
-                        and transcription_factor != self.transcription_factor:
-                    continue
+
+            def get_activations_for_tf(transcription_factor):
+                result = []
                 motifs = self.datareader.get_motifs_h(transcription_factor)
                 if len(motifs) > 0:
                     with tf.variable_scope(transcription_factor) as tfscope:
@@ -146,8 +145,16 @@ class ConvNet:
                                     denominator = div
                                     break
                             activation = tf.nn.bias_add(conv, conv_biases)
-                            pooled = tf.nn.relu(max_pool_1xn(activation, num_nodes/denominator))
-                            activations.append(flatten(pooled))
+                            pooled = tf.nn.relu(max_pool_1xn(activation, num_nodes / denominator))
+                            result.append(flatten(pooled))
+                return result
+
+            if int(self.config) == int(configuration.SEQ_SHAPE_SPECIFICUSUAL):
+                activations.extend(get_activations_for_tf(self.transcription_factor))
+            else:
+                for transcription_factor in self.datareader.get_tfs():
+                    activations.extend(get_activations_for_tf(transcription_factor))
+
 
             with tf.variable_scope('fc100') as fcscope:
                 drop_usual = fully_connected(tf.concat(1, activations), 100)
@@ -221,13 +228,12 @@ class ConvNet:
                 logits = fully_connected(drop, 1, None, variables_collections='test')
 
         # TENSORBOARD SUMMARY INFO
-        conv_kernel_h = tf.histogram_summary('usual histogram', usual_conv_kernel)
         conv_kernel_h2 = tf.histogram_summary('rmotif histogram', rmotif_conv_kernel)
         merged_summary = tf.merge_all_summaries()
 
         return logits, merged_summary
 
-    def fit(self, X, y, S=None, gene_expression=None, da=None):
+    def fit(self, X, y, S=None, gene_expression=None, da=None, y_quant=None):
         summary_writer = tf.train.SummaryWriter(self.model_dir + 'train')
         try:
             if self.regression:
@@ -397,8 +403,5 @@ class ConvNet:
                 predictions.extend(prediction)
         predictions = np.array(predictions).flatten()
         return predictions
-
-    def get_output_for_dense_layer(self, X):
-        return
 
 

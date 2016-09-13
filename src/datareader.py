@@ -625,5 +625,5 @@ class DataReader:
 
 if __name__ == '__main__':
     datareader = DataReader('../data/')
-    print len(datareader.get_tfs())
+    print datareader.get_gene_expression_tpm(['MCF-7']).shape
 

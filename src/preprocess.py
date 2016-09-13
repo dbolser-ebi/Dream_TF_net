@@ -213,6 +213,4 @@ if __name__ == '__main__':
         preprocess_dnase(num_jobs, bin_size)
     if args.chipseq:
         preprocess_chipseq(num_jobs, bin_size)
-        normalize_chipseq(num_jobs)
-
 

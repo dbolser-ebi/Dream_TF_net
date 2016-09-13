@@ -4,16 +4,136 @@ import argparse
 from convnet import *
 import sqlite3
 from progress.bar import Bar
-
+import copy
 
 def finish_bar(bar):
     if bar is not None:
         bar.finish()
 
 
+class Data:
+
+    def __init__(self, run_id, path, bin_size, num_dnase_features, num_train_instances=-1, num_train_celltypes=-1, num_test_instances=-1):
+        self.run_id = run_id
+        self.path = path
+        self.num_train_instances = num_train_instances
+        self.num_celltypes = num_train_celltypes
+        self.bin_size = bin_size
+        self.num_dnase_features = num_dnase_features
+        self.num_test_instances = num_test_instances
+
+        if self.exists():
+            self.load_from_disk()
+        else:
+            if num_train_instances != -1:
+                self.X_train = self.get_X(model, self.num_train_instances, self.bin_size)
+                self.S_train = self.get_S(model, self.num_train_instances, self.bin_size)
+                self.y_train = self.get_y_train(model, self.num_train_instances, num_train_celltypes)
+                self.da_train = self.get_da_train(model, self.num_train_instances, num_train_celltypes, self.num_dnase_features)
+                self.da_train_val = np.zeros((self.num_train_instances, self.num_dnase_features, 1), dtype=np.float32)
+                self.y_train_val = np.zeros((self.num_train_instances,), dtype=np.int32)
+            elif num_test_instances != -1:
+                self.X_test = self.get_X(model, self.num_test_instances, self.bin_size)
+                self.S_test = self.get_S(model, self.num_test_instances, self.bin_size)
+                self.y_test = self.get_y_test(model, self.num_test_instances)
+                self.da_test = self.get_da_test(model, self.num_test_instances, self.num_dnase_features)
+
+    def get_X(self, model, num_instances, bin_size):
+        if isinstance(model, ConvNet):
+            X = np.zeros((num_instances, bin_size, 4), dtype=np.float32)
+        else:
+            X = np.zeros((num_instances, 4, bin_size), dtype=np.float32)
+        return X
+
+    def get_S(self, model, num_instances, bin_size):
+        if isinstance(model, ConvNet):
+            S = np.zeros((num_instances, bin_size, 4), dtype=np.float32)
+        else:
+            S = np.zeros((num_instances, 4, bin_size), dtype=np.float32)
+        return S
+
+    def get_y_train(self, model, num_instances, num_celltypes):
+        if isinstance(model, ConvNet):
+            y_train = np.zeros((num_instances, num_celltypes), dtype=np.float16)
+        else:
+            y_train = np.zeros((num_instances,), dtype=np.int32)
+        return y_train
+
+    def get_da_train(self, model, num_instances, num_celltypes, num_features):
+        if isinstance(model, ConvNet):
+            da_train = np.zeros((num_instances, num_features, num_celltypes), dtype=np.float32)
+        else:
+            da_train = None
+        return da_train
+
+    def get_y_test(self, model, num_instances):
+        if isinstance(model, ConvNet):
+            y_test = np.zeros((num_instances,), dtype=np.float16)
+        else:
+            y_test = np.zeros((num_instances,), dtype=np.int32)
+        return y_test
+
+    def get_da_test(self, model, num_instances, num_features):
+        if isinstance(model, ConvNet):
+            da_test = np.zeros((num_instances, num_features, 1), dtype=np.float16)
+        else:
+            da_test = None
+        return da_test
+
+    def save_to_disk(self):
+        if self.num_train_instances != -1:
+            np.save(os.path.join(self.path, self.run_id + 'Xtrain.npy'), self.X_train)
+            np.save(os.path.join(self.path, self.run_id + 'Strain.npy'),
+                    self.S_train)
+            np.save(os.path.join(self.path, self.run_id + 'datrain.npy'),
+                    self.da_train)
+            np.save(
+                os.path.join(self.path, self.run_id + 'datrain_val.npy'),
+                self.da_train_val)
+            np.save(os.path.join(self.path, self.run_id + 'ytrain.npy'), self.y_train)
+            np.save(os.path.join(self.path, self.run_id + 'ytrain_val.npy'), self.y_train_val)
+        elif self.num_test_instances != -1:
+            np.save(os.path.join(self.path, self.run_id + 'Xtest.npy'), self.X_test)
+            np.save(os.path.join(self.path, self.run_id + 'Stest.npy'),
+                    self.S_test)
+            np.save(os.path.join(self.path, self.run_id + 'datest.npy'),
+                    self.da_test)
+            np.save(os.path.join(self.path, self.run_id + 'ytest.npy'), self.y_test)
+
+    def load_from_disk(self):
+        if self.num_train_instances != -1:
+            print "Loading train set from file:", self.run_id
+            self.X_train = np.load(os.path.join(self.path, self.run_id + 'Xtrain.npy'))
+            self.S_train = np.load(
+                os.path.join(self.path, self.run_id + 'Strain.npy'))
+            self.da_train = np.load(
+                os.path.join(self.path, self.run_id + 'datrain.npy'))
+            self.da_train_val = np.load(
+                os.path.join(self.path, self.run_id + 'datrain_val.npy'))
+            self.y_train = np.load(os.path.join(self.path, self.run_id + 'ytrain.npy'))
+            self.y_train_val = np.load(os.path.join(self.path, self.run_id + 'ytrain_val.npy'))
+
+        elif self.num_test_instances != -1:
+            print "Loading validation set from file:", self.run_id
+            self.X_test = np.load(os.path.join(self.path, self.run_id + 'Xtest.npy'))
+            self.S_test = np.load(
+                os.path.join(self.path, self.run_id + 'Stest.npy'))
+            self.da_test = np.load(
+                os.path.join(self.path, self.run_id + 'datest.npy'))
+            self.y_test = np.load(os.path.join(self.path, self.run_id + 'ytest.npy'))
+
+    def exists(self):
+        fnames = [mname for mname in os.listdir(self.path)]
+        for fname in fnames:
+            if self.run_id in fname:
+                return True
+        return False
+
+
 class Evaluator:
 
-    def __init__(self, datapath, bin_size=200, ambiguous_as_bound=False, regression=False, show_progress=True, num_dnase_features=4):
+    def __init__(self, datapath, bin_size=200, ambiguous_as_bound=False,
+                 regression=False, show_progress=True, num_dnase_features=4):
         self.num_dnase_features = num_dnase_features
         self.num_train_instances = 51676736
         self.num_tf = 32
@@ -184,7 +304,7 @@ class Evaluator:
         else:
             return None
 
-    def make_ladder_predictions(self, model, transcription_factor, unbound_fraction=1, leaderboard=True):
+    def make_ladder_predictions(self, model, transcription_factor, unbound_fraction=1.0, leaderboard=True):
         tf_leaderboard = {
             'ARID3A': ['K562'],
             'ATF2': ['K562'],
@@ -366,10 +486,12 @@ class Evaluator:
                         print>>fout, str(line.strip())+'\t'+str(y_test[idx])
 
     def run_cross_cell_benchmark(self, model, transcription_factor,
-                                 save_train_set=False, unbound_fraction=1,
-                                 arguments=""):
+                                 save_train_set=True, unbound_fraction=1.0,
+                                 arguments="", save_valid_set=True):
 
         print "Running cross celltype benchmark for transcription factor %s" % transcription_factor
+
+
         #--------------- TRAIN
         celltypes = self.datareader.get_celltypes_for_tf(transcription_factor)
         self.num_train_instances = int(self.datareader.get_num_bound_lines(transcription_factor, self.ambiguous_as_bound)*(1+unbound_fraction))
@@ -379,72 +501,53 @@ class Evaluator:
         celltypes_train = celltypes[:-1]
         celltypes_test = celltypes[-1]
 
-        # id for binary data
-        run_id = 'models/' + transcription_factor + model.__class__.__name__ + \
-                 "_ub_"+str(unbound_fraction) + "_ab_" + str(self.ambiguous_as_bound)\
+        run_id = transcription_factor + model.__class__.__name__ + \
+                 "_ub_" + str(unbound_fraction) + "_ab_" + str(self.ambiguous_as_bound) \
                  + "bs" + str(self.bin_size) + "_reg_" + str(self.regression)
 
-        def already_computed():
-            fnames = [mname for mname in os.listdir(os.path.join(self.datapath, 'models/'))]
-            for fname in fnames:
-                if run_id[7:] in fname:
-                    return True
-            return False
-
-        if already_computed():
-            X_train, S_train, da_train, da_train_val, y_train, y_train_val = self.load_model(run_id)
-        else:
-            y_train_val = np.zeros((self.num_train_instances,), dtype=np.int32)
-            X_train = self.get_X(model, self.num_train_instances, self.bin_size)
-            S_train = self.get_S(model, self.num_train_instances, self.bin_size)
-            y_train = self.get_y_train(model, self.num_train_instances, len(celltypes_train))
-            da_train = self.get_da_train(model, self.num_train_instances, len(celltypes_train), self.num_dnase_features)
-            da_train_val = np.zeros((self.num_train_instances, self.num_dnase_features, 1), dtype=np.float32)
-
+        model_path = os.path.join(self.datapath, 'models/')
+        data = Data(run_id, model_path, self.bin_size,
+                    self.num_dnase_features, self.num_train_instances, len(celltypes_train))
+        if not data.exists():
             if self.show_progress:
                 bar = Bar('Loading train set', fill='#', suffix='%(percent)d%%', max=self.num_train_instances)
 
             for idx, instance in enumerate(self.datareader.generate_cross_celltype('train', transcription_factor,
-                                           celltypes,
-                                            self.num_dnase_features,
-                                           options=[CrossvalOptions.balance_peaks],
-                                            unbound_fraction=unbound_fraction,
-                                            ambiguous_as_bound=self.ambiguous_as_bound,
-                                            bin_size=self.bin_size,
-                                            regression=self.regression
-                                            )):
+                                                                                   celltypes,
+                                                                                   self.num_dnase_features,
+                                                                                   options=[
+                                                                                       CrossvalOptions.balance_peaks],
+                                                                                   unbound_fraction=unbound_fraction,
+                                                                                   ambiguous_as_bound=self.ambiguous_as_bound,
+                                                                                   bin_size=self.bin_size,
+                                                                                   regression=self.regression
+                                                                                   )):
                 (_, _), sequence, shape_features, dnase_features, labels = instance
-                X_train[idx] = self.get_X_data(model, sequence)
-                S_train[idx] = self.get_S_data(model, shape_features, self.bin_size)
-                da_train[idx] = self.get_da_train_data(model, dnase_features)
-                da_train_val[idx, :, :] = np.reshape(dnase_features[:, -1], (self.num_dnase_features, 1))
-                y_train[idx] = self.get_y_train_data(model, labels)
-                y_train_val[idx] = labels.flatten()[-1]
+                data.X_train[idx] = self.get_X_data(model, sequence)
+                data.S_train[idx] = self.get_S_data(model, shape_features, self.bin_size)
+                data.da_train[idx] = self.get_da_train_data(model, dnase_features)
+                data.da_train_val[idx, :, :] = np.reshape(dnase_features[:, -1], (self.num_dnase_features, 1))
+                data.y_train[idx] = self.get_y_train_data(model, labels)
+                data.y_train_val[idx] = labels.flatten()[-1]
                 if self.show_progress:
                     bar.next()
 
             if self.show_progress:
                 bar.finish()
 
-            if save_train_set:
-                self.save_model(X_train, S_train,
-                                da_train, da_train_val, y_train, y_train_val, run_id)
+        if save_train_set:
+            data.save_to_disk()
 
         gene_expression_features = self.datareader.get_gene_expression_tpm(celltypes_train)
-        model.fit(X_train, y_train, S_train, gene_expression_features, da_train)
+        model.fit(data.X_train, data.y_train, data.S_train, gene_expression_features, data.da_train)
 
         gene_expression_features = self.datareader.get_gene_expression_tpm(celltypes_test)
-        predictions = model.predict(X_train, S_train, gene_expression_features, da_train_val)
+        predictions = model.predict(data.X_train, data.S_train, gene_expression_features, data.da_train_val)
 
         print 'TRAINING COMPLETED'
-        self.print_results(y_train_val, predictions)
+        self.print_results(data.y_train_val, predictions)
 
-        # free up memory
-        del X_train
-        del y_train
-        del S_train
-        del y_train_val
-        del da_train
+        del data
 
         # --------------- VALIDATION
         print
@@ -452,12 +555,9 @@ class Evaluator:
         test_chromosomes = sorted(['chr10', 'chr11', 'chr12', 'chr13'])
         curr_chr = '-1'
 
-        y_test = None
-        X_test = None
-        S_test = None
-        da_test = None
         bar = None
         idx = 0
+        data = None
 
         tot_num_test_instances = reduce(lambda x, y: self.datareader.get_num_instances(y)+x, test_chromosomes, 0)
         if isinstance(model, ConvNet):
@@ -468,6 +568,27 @@ class Evaluator:
             y_tot_test = np.zeros((tot_num_test_instances,), dtype=np.int32)
         t_idx = 0
 
+        #run cached test sets
+        for chromosome in copy.deepcopy(test_chromosomes):
+            self.num_test_instances = self.datareader.get_num_instances(chromosome)
+            run_id = chromosome + transcription_factor + model.__class__.__name__ +\
+                     "_ub_" + str(unbound_fraction) + "_ab_" + str(self.ambiguous_as_bound) \
+                     + "bs" + str(self.bin_size) + "_reg_" + str(self.regression)
+            data = Data(run_id, model_path, self.bin_size,
+                        self.num_dnase_features, num_test_instances=self.num_test_instances)
+            if data.exists():
+                print 'Results for test', chromosome
+                print 'num test instances', self.num_test_instances
+                y_pred = model.predict(data.X_test, data.S_test, gene_expression_features, data.da_test)
+                self.print_results(data.y_test, y_pred)
+                y_tot_test[t_idx:t_idx + self.num_test_instances] = data.y_test
+                y_tot_pred[t_idx:t_idx + self.num_test_instances] = y_pred
+                t_idx += self.num_test_instances
+                test_chromosomes.remove(chromosome)
+
+            del data
+
+        # Load / run remaining test sets
         for instance in self.datareader.generate_cross_celltype('train', transcription_factor,
                                                                 [celltypes_test],
                                                                 num_dnase_features=self.num_dnase_features,
@@ -475,17 +596,19 @@ class Evaluator:
                                                                 regression=self.regression):
 
             (chromosome, start), sequence, shape_features, dnase_features, label = instance
-            if test_chromosomes[-1] < chromosome and curr_chr == '-1':
+            if len(test_chromosomes) == 0 or test_chromosomes[-1] < chromosome and curr_chr == '-1':
                 break
 
             if curr_chr == '-1' and chromosome in test_chromosomes:
 
                 curr_chr = chromosome
                 self.num_test_instances = self.datareader.get_num_instances(chromosome)
-                X_test = self.get_X(model, self.num_test_instances, self.bin_size)
-                S_test = self.get_S(model, self.num_test_instances, self.bin_size)
-                y_test = self.get_y_test(model, self.num_test_instances)
-                da_test = self.get_da_test(model, self.num_test_instances, self.num_dnase_features)
+
+                run_id = curr_chr + transcription_factor + model.__class__.__name__ + \
+                         "_ub_" + str(unbound_fraction) + "_ab_" + str(self.ambiguous_as_bound) \
+                         + "bs" + str(self.bin_size) + "_reg_" + str(self.regression)
+                data = Data(run_id, model_path, self.bin_size,
+                            self.num_dnase_features, num_test_instances=self.num_test_instances)
                 if self.show_progress:
                     finish_bar(bar)
                     bar = Bar('Loading chromosome %s' % curr_chr, fill='#', suffix='%(percent)d%%', max=self.num_test_instances)
@@ -495,41 +618,46 @@ class Evaluator:
 
                 print 'Results for test', curr_chr
                 print 'num test instances', self.num_test_instances
-                y_pred = model.predict(X_test, S_test, gene_expression_features, da_test)
-                self.print_results(y_test, y_pred)
-                y_tot_test[t_idx:t_idx + self.num_test_instances] = y_test
+                y_pred = model.predict(data.X_test, data.S_test, gene_expression_features, data.da_test)
+                self.print_results(data.y_test, y_pred)
+                y_tot_test[t_idx:t_idx + self.num_test_instances] = data.y_test
                 y_tot_pred[t_idx:t_idx + self.num_test_instances] = y_pred
                 t_idx += self.num_test_instances
+                if save_valid_set:
+                    data.save_to_disk()
 
                 curr_chr = chromosome
                 self.num_test_instances = self.datareader.get_num_instances(chromosome)
-                X_test = self.get_X(model, self.num_test_instances, self.bin_size)
-                S_test = self.get_S(model, self.num_test_instances, self.bin_size)
-                y_test = self.get_y_test(model, self.num_test_instances)
-                da_test = self.get_da_test(model, self.num_test_instances, self.num_dnase_features)
+                run_id = curr_chr + transcription_factor + model.__class__.__name__ + \
+                         "_ub_" + str(unbound_fraction) + "_ab_" + str(self.ambiguous_as_bound) \
+                         + "bs" + str(self.bin_size) + "_reg_" + str(self.regression)
+                data = Data(run_id, model_path, self.bin_size,
+                            self.num_dnase_features, num_test_instances=self.num_test_instances)
                 if self.show_progress:
                     finish_bar(bar)
                     bar = Bar('Loading chromosome %s' % curr_chr, fill='#', suffix='%(percent)d%%', max=self.num_test_instances)
                 idx = 0
 
             elif curr_chr != '-1' and curr_chr != chromosome:
+
                 finish_bar(bar)
                 print 'Results for test', curr_chr
                 print 'num test instances', self.num_test_instances
-                y_pred = model.predict(X_test, S_test, gene_expression_features, da_test)
-
-                self.print_results(y_test, y_pred)
-                y_tot_test[t_idx:t_idx+self.num_test_instances] = y_test
+                y_pred = model.predict(data.X_test, data.S_test, gene_expression_features, data.da_test)
+                self.print_results(data.y_test, y_pred)
+                y_tot_test[t_idx:t_idx+self.num_test_instances] = data.y_test
                 y_tot_pred[t_idx:t_idx+self.num_test_instances] = y_pred
                 t_idx += self.num_test_instances
+                if save_valid_set:
+                    data.save_to_disk()
 
                 curr_chr = '-1'
 
             if curr_chr == chromosome:
-                y_test[idx] = label
-                X_test[idx] = self.get_X_data(model, sequence)
-                S_test[idx] = self.get_S_data(model, shape_features, self.bin_size)
-                da_test[idx] = dnase_features
+                data.y_test[idx] = label
+                data.X_test[idx] = self.get_X_data(model, sequence)
+                data.S_test[idx] = self.get_S_data(model, shape_features, self.bin_size)
+                data.da_test[idx] = dnase_features
                 if self.show_progress:
                     bar.next()
                 idx += 1
@@ -543,7 +671,7 @@ class Evaluator:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--transcription_factors', '-tfs', help='Comma separated list of transcription factors', required=True)
-    parser.add_argument('--model', '-m', help='Choose model [TFC/THC]', required=True)
+    parser.add_argument('--model', '-m', help='Choose model [TFC]', required=True)
     parser.add_argument('--validate', '-v', action='store_true', help='run cross TF validation benchmark', required=False)
     parser.add_argument('--ladder', '-l', action='store_true', help='predict TF ladderboard', required=False)
     parser.add_argument('--test', '-t', action='store_true', help='predict TF final round', required=False)
@@ -554,6 +682,7 @@ if __name__ == '__main__':
     parser.add_argument('--bin_size', '-bs', help='Sequence bin size (must be an even number >= 200)', required=False)
     parser.add_argument('--regression', '-reg', help='Use the chipseq signal strength as targets', action='store_true', required=False)
     parser.add_argument('--show_progress', '-sp', help="show progress in progress bar", action='store_true', required=False)
+    parser.add_argument('--save_validset', '-sv', help="save validation set", action='store_true', required=False)
     args = parser.parse_args()
     model = None
 
@@ -573,7 +702,7 @@ if __name__ == '__main__':
     else:
         print "Model options: TFC (TensorFlow Convnet)"
 
-    unbound_fraction = 1
+    unbound_fraction = 1.0
 
     if args.unbound_fraction is not None:
         unbound_fraction = float(args.unbound_fraction)
@@ -587,7 +716,8 @@ if __name__ == '__main__':
             if args.validate:
                 evaluator.run_cross_cell_benchmark(model, transcription_factor, save_train_set=True,
                                                    unbound_fraction=unbound_fraction,
-                                                   arguments=str(vars(args)).replace('\'', ''))
+                                                   arguments=str(vars(args)).replace('\'', ''),
+                                                   save_valid_set=args.save_validset)
             if args.ladder:
                 evaluator.make_ladder_predictions(model, transcription_factor, unbound_fraction=unbound_fraction, leaderboard=True)
 
