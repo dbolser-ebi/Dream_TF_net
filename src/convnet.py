@@ -16,6 +16,7 @@ class configuration:
     SEQ_DNASE = 7
     SEQ_DNASE_SHAPE = 8
     SEQ_DNASE_SHAPE_ALLUSUAL = 9
+    USUAL_DNASE = 10
 
 
 class bcolors:
@@ -127,8 +128,7 @@ class ConvNet:
                 motifs = self.datareader.get_motifs_h(transcription_factor)
                 if len(motifs) > 0:
                     with tf.variable_scope(transcription_factor) as tfscope:
-                        for idx, motif in enumerate(motifs):
-                            pssm = self.datareader.calc_pssm(motif)
+                        for idx, pssm in enumerate(motifs):
                             usual_conv_kernel = \
                                 tf.get_variable('motif_%d' % idx,
                                                 shape=(1, pssm.shape[0], pssm.shape[1], 1), dtype=tf.float32,
@@ -149,12 +149,11 @@ class ConvNet:
                             result.append(flatten(pooled))
                 return result
 
-            if int(self.config) == int(configuration.SEQ_SHAPE_SPECIFICUSUAL):
+            if int(self.config) == int(configuration.SEQ_SHAPE_SPECIFICUSUAL) or int(self.config) == int(configuration.USUAL_DNASE):
                 activations.extend(get_activations_for_tf(self.transcription_factor))
             else:
                 for transcription_factor in self.datareader.get_tfs():
                     activations.extend(get_activations_for_tf(transcription_factor))
-
 
             with tf.variable_scope('fc100') as fcscope:
                 drop_usual = fully_connected(tf.concat(1, activations), 100)
@@ -219,6 +218,8 @@ class ConvNet:
                     merged = tf.concat(1, [drop_rmotif, dnase_features, drop_shape])
                 elif self.config == int(configuration.SEQ_DNASE_SHAPE_ALLUSUAL):
                     merged = tf.concat(1, [drop_rmotif, dnase_features, drop_shape, drop_usual])
+                elif self.config == int(configuration.USUAL_DNASE):
+                    merged = tf.concat(1, [drop_usual, dnase_features])
 
             with tf.variable_scope('fc') as fcscope:
                 activation = fully_connected(merged, 1000)

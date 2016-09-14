@@ -411,21 +411,36 @@ class DataReader:
          'chr19': 1165049, 'chr18': 1561114}
         return chr_num[chromosome]
 
-    def get_motifs_h(self, transcription_factor):
+    def get_motifs_h(self, transcription_factor, verbose=False):
         motifs = []
+
+        def get_motif(directory, unpack=True, skiprows=0, calc_pssm=False):
+            for f in os.listdir(directory):
+                if transcription_factor.upper() == f.split('_')[0].upper():
+                    motif = np.loadtxt(os.path.join(directory, f), dtype=np.float32, unpack=unpack, skiprows=skiprows)
+                    if calc_pssm:
+                        motif = self.calc_pssm(motif)
+                    if verbose:
+                        print "motif found in", directory
+                        print "motif:", f, motif.shape
+                        print motif
+                    motifs.append(motif)
+
         # Try Jaspar
         JASPAR_dir = os.path.join(self.datapath, 'preprocess/JASPAR/')
-        for f in os.listdir(JASPAR_dir):
-            if transcription_factor.upper() in f.upper():
-                # print "motif found in JASPAR"
-                motifs.append(np.loadtxt(os.path.join(JASPAR_dir, f), dtype=np.float32, unpack=True))
+        get_motif(JASPAR_dir, calc_pssm=True)
 
         # Try SELEX
         SELEX_dir = os.path.join(self.datapath, 'preprocess/SELEX_PWMs_for_Ensembl_1511_representatives/')
-        for f in os.listdir(SELEX_dir):
-            if f.upper().startswith(transcription_factor.upper()):
-                # print "motif found in SELEX"
-                motifs.append(np.loadtxt(os.path.join(SELEX_dir, f), dtype=np.float32, unpack=True))
+        get_motif(SELEX_dir, calc_pssm=True)
+
+        # Try Autosome mono
+        AUTOSOME_mono_dir = os.path.join(self.datapath, 'preprocess/autosome/mono_pwm')
+        get_motif(AUTOSOME_mono_dir, unpack=False, skiprows=1)
+
+        # Try Autosome di
+        #AUTOSOME_di_dir = os.path.join(self.datapath, 'preprocess/autosome/di_pwm')
+        #get_motif(AUTOSOME_di_dir, unpack=False, skiprows=1)
 
         return motifs
 
@@ -625,5 +640,5 @@ class DataReader:
 
 if __name__ == '__main__':
     datareader = DataReader('../data/')
-    print datareader.get_gene_expression_tpm(['MCF-7']).shape
+    datareader.get_motifs_h('E2F1', True)
 

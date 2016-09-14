@@ -6,6 +6,7 @@ import sqlite3
 from progress.bar import Bar
 import copy
 
+
 def finish_bar(bar):
     if bar is not None:
         bar.finish()
