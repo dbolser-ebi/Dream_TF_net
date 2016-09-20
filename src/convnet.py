@@ -4,6 +4,7 @@ from sklearn.cross_validation import StratifiedKFold, KFold
 import time
 from datareader import DataReader
 from tensorflow.contrib.layers.python.layers import *
+import xgboost as xgb
 
 
 class configuration:
