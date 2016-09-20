@@ -3,82 +3,73 @@ from performance_metrics import *
 import argparse
 from convnet import *
 import sqlite3
-from progress.bar import Bar
 import copy
-
-
-def finish_bar(bar):
-    if bar is not None:
-        bar.finish()
+from ensemblr import *
 
 
 class Data:
 
-    def __init__(self, run_id, path, bin_size, num_dnase_features, num_train_instances=-1, num_train_celltypes=-1, num_test_instances=-1):
-        self.run_id = run_id
+    def __init__(self, path, transcription_factor, bin_size,
+                 dnase_bin_size, chipseq_bin_size, num_dnase_features, ambiguous_as_bound,
+                 num_train_instances=-1, num_train_celltypes=-1, num_test_instances=-1):
+        self.transcription_factor = transcription_factor
         self.path = path
         self.num_train_instances = num_train_instances
         self.num_celltypes = num_train_celltypes
         self.bin_size = bin_size
         self.num_dnase_features = num_dnase_features
         self.num_test_instances = num_test_instances
+        self.dnase_bin_size = dnase_bin_size
+        self.chipseq_bin_size = chipseq_bin_size
+        self.train_id = transcription_factor + str(self.num_train_instances)
+        self.test_id = transcription_factor + str(self.num_test_instances)
+        self.ambiguous_as_bound = ambiguous_as_bound
+        self.run_id = transcription_factor + \
+                 "_ub_" + str(unbound_fraction) + "_ab_" + str(self.ambiguous_as_bound) \
+                 + "_bs_" + str(self.bin_size) + "_dbs_" + str(self.dnase_bin_size) + \
+                 "_cbs_" + str(self.chipseq_bin_size)
 
         if self.exists():
             self.load_from_disk()
         else:
             if num_train_instances != -1:
-                self.X_train = self.get_X(model, self.num_train_instances, self.bin_size)
-                self.S_train = self.get_S(model, self.num_train_instances, self.bin_size)
-                self.y_train = self.get_y_train(model, self.num_train_instances, num_train_celltypes)
-                self.da_train = self.get_da_train(model, self.num_train_instances, num_train_celltypes, self.num_dnase_features)
+                self.X_train = self.get_X(self.num_train_instances, self.bin_size)
+                self.S_train = self.get_S(self.num_train_instances, self.bin_size)
+                self.y_train = self.get_y_train(self.num_train_instances, num_train_celltypes)
+                self.da_train = self.get_da_train(self.num_train_instances, num_train_celltypes, self.num_dnase_features)
                 self.da_train_val = np.zeros((self.num_train_instances, self.num_dnase_features, 1), dtype=np.float32)
                 self.y_train_val = np.zeros((self.num_train_instances,), dtype=np.int32)
+                self.chipseq_fold_coverage_train = np.zeros((self.num_train_instances, num_train_celltypes), dtype=np.float32)
             elif num_test_instances != -1:
-                self.X_test = self.get_X(model, self.num_test_instances, self.bin_size)
-                self.S_test = self.get_S(model, self.num_test_instances, self.bin_size)
-                self.y_test = self.get_y_test(model, self.num_test_instances)
-                self.da_test = self.get_da_test(model, self.num_test_instances, self.num_dnase_features)
+                self.X_test = self.get_X(self.num_test_instances, self.bin_size)
+                self.S_test = self.get_S(self.num_test_instances, self.bin_size)
+                self.y_test = self.get_y_test(self.num_test_instances)
+                self.da_test = self.get_da_test(self.num_test_instances, self.num_dnase_features)
+                self.chipseq_fold_coverage_test = np.zeros((self.num_test_instances, num_train_celltypes),
+                                                            dtype=np.float32)
 
-    def get_X(self, model, num_instances, bin_size):
-        if isinstance(model, ConvNet):
-            X = np.zeros((num_instances, bin_size, 4), dtype=np.float32)
-        else:
-            X = np.zeros((num_instances, 4, bin_size), dtype=np.float32)
+    def get_X(self, num_instances, bin_size):
+        X = np.zeros((num_instances, bin_size, 4), dtype=np.float32)
         return X
 
-    def get_S(self, model, num_instances, bin_size):
-        if isinstance(model, ConvNet):
-            S = np.zeros((num_instances, bin_size, 4), dtype=np.float32)
-        else:
-            S = np.zeros((num_instances, 4, bin_size), dtype=np.float32)
+    def get_S(self, num_instances, bin_size):
+        S = np.zeros((num_instances, bin_size, 4), dtype=np.float32)
         return S
 
-    def get_y_train(self, model, num_instances, num_celltypes):
-        if isinstance(model, ConvNet):
-            y_train = np.zeros((num_instances, num_celltypes), dtype=np.float16)
-        else:
-            y_train = np.zeros((num_instances,), dtype=np.int32)
+    def get_y_train(self, num_instances, num_celltypes):
+        y_train = np.zeros((num_instances, num_celltypes), dtype=np.float32)
         return y_train
 
-    def get_da_train(self, model, num_instances, num_celltypes, num_features):
-        if isinstance(model, ConvNet):
-            da_train = np.zeros((num_instances, num_features, num_celltypes), dtype=np.float32)
-        else:
-            da_train = None
+    def get_da_train(self, num_instances, num_celltypes, num_features):
+        da_train = np.zeros((num_instances, num_features, num_celltypes), dtype=np.float32)
         return da_train
 
-    def get_y_test(self, model, num_instances):
-        if isinstance(model, ConvNet):
-            y_test = np.zeros((num_instances,), dtype=np.float16)
-        else:
-            y_test = np.zeros((num_instances,), dtype=np.int32)
+    def get_y_test(self, num_instances):
+        y_test = np.zeros((num_instances,), dtype=np.float32)
         return y_test
 
-    def get_da_test(self, model, num_instances, num_features):
-        if isinstance(model, ConvNet):
-            da_test = np.zeros((num_instances, num_features, 1), dtype=np.float16)
-        else:
-            da_test = None
+    def get_da_test(self, num_instances, num_features):
+        da_test = np.zeros((num_instances, num_features, 1), dtype=np.float32)
         return da_test
 
     def save_to_disk(self):
@@ -93,13 +84,17 @@ class Data:
                 self.da_train_val)
             np.save(os.path.join(self.path, self.run_id + 'ytrain.npy'), self.y_train)
             np.save(os.path.join(self.path, self.run_id + 'ytrain_val.npy'), self.y_train_val)
+            np.save(os.path.join(self.path, self.run_id + 'chipseq_fold_coverage_train.npy'),
+                    self.chipseq_fold_coverage_train)
+
         elif self.num_test_instances != -1:
-            np.save(os.path.join(self.path, self.run_id + 'Xtest.npy'), self.X_test)
-            np.save(os.path.join(self.path, self.run_id + 'Stest.npy'),
-                    self.S_test)
-            np.save(os.path.join(self.path, self.run_id + 'datest.npy'),
-                    self.da_test)
-            np.save(os.path.join(self.path, self.run_id + 'ytest.npy'), self.y_test)
+            np.save(os.path.join(self.path, self.test_id + str(self.bin_size) + 'Xtest.npy'), self.X_test)
+            np.save(os.path.join(self.path, self.test_id + str(self.bin_size) + 'Stest.npy'), self.S_test)
+            np.save(os.path.join(self.path, self.test_id + str(self.dnase_bin_size)
+                                 + str(self.num_dnase_features) + 'datest.npy'), self.da_test)
+            np.save(os.path.join(self.path, self.test_id + str(self.ambiguous_as_bound) + 'ytest.npy'), self.y_test)
+            np.save(os.path.join(self.path, self.test_id + str(self.chipseq_bin_size)
+                                 + 'chipseq_fold_coverage_test.npy'), self.chipseq_fold_coverage_test)
 
     def load_from_disk(self):
         if self.num_train_instances != -1:
@@ -113,6 +108,7 @@ class Data:
                 os.path.join(self.path, self.run_id + 'datrain_val.npy'))
             self.y_train = np.load(os.path.join(self.path, self.run_id + 'ytrain.npy'))
             self.y_train_val = np.load(os.path.join(self.path, self.run_id + 'ytrain_val.npy'))
+            self.chipseq_fold_coverage_train = np.load(os.path.join(self.path, self.run_id + 'chipseq_fold_coverage_train.npy'))
 
         elif self.num_test_instances != -1:
             print "Loading validation set from file:", self.run_id
@@ -122,19 +118,25 @@ class Data:
             self.da_test = np.load(
                 os.path.join(self.path, self.run_id + 'datest.npy'))
             self.y_test = np.load(os.path.join(self.path, self.run_id + 'ytest.npy'))
+            self.chipseq_fold_coverage_test = np.load(
+                os.path.join(self.path, self.run_id + 'chipseq_fold_coverage_test.npy'))
 
     def exists(self):
         fnames = [mname for mname in os.listdir(self.path)]
         for fname in fnames:
-            if self.run_id in fname:
+            if self.run_id in fname \
+                    and (
+                                (self.num_train_instances != -1 and "train" in fname) or
+                                (self.num_test_instances != -1 and "test" in fname)
+                    ):
                 return True
         return False
 
 
 class Evaluator:
 
-    def __init__(self, datapath, bin_size=200, ambiguous_as_bound=False,
-                 regression=False, show_progress=True, num_dnase_features=4):
+    def __init__(self, datapath, bin_size=200, ambiguous_as_bound=False, show_progress=True, num_dnase_features=4,
+                 unbound_fraction=1.0, dnase_bin_size=200, chipseq_bin_size=200, debug=False):
         self.num_dnase_features = num_dnase_features
         self.num_train_instances = 51676736
         self.num_tf = 32
@@ -144,8 +146,12 @@ class Evaluator:
         self.datareader = DataReader(datapath)
         self.bin_size = bin_size
         self.ambiguous_as_bound = ambiguous_as_bound
-        self.regression = regression
         self.show_progress = show_progress
+        self.unbound_fraction = unbound_fraction
+        self.chipseq_bin_size = chipseq_bin_size
+        self.dnase_bin_size = dnase_bin_size
+        self.num_test_instances = 0
+        self.debug = debug
 
     def print_results(self, y_test, y_pred):
         TP = 0
@@ -201,109 +207,48 @@ class Evaluator:
         conn.commit()
         conn.close()
 
-    def get_X(self, model, num_instances, bin_size):
-        if isinstance(model, ConvNet):
-            X = np.zeros((num_instances, bin_size, 4), dtype=np.float32)
-        else:
-            X = np.zeros((num_instances, 4, bin_size), dtype=np.float32)
+    def get_X(self, num_instances, bin_size):
+        X = np.zeros((num_instances, bin_size, 4), dtype=np.float32)
         return X
 
-    def get_S(self, model, num_instances, bin_size):
-        if isinstance(model, ConvNet):
-            S = np.zeros((num_instances, bin_size, 4), dtype=np.float32)
-        else:
-            S = np.zeros((num_instances, 4, bin_size), dtype=np.float32)
+    def get_S(self, num_instances, bin_size):
+        S = np.zeros((num_instances, bin_size, 4), dtype=np.float32)
         return S
 
-    def get_y_train(self, model, num_instances, num_celltypes):
-        if isinstance(model, ConvNet):
-            y_train = np.zeros((num_instances, num_celltypes), dtype=np.float16)
-        else:
-            y_train = np.zeros((num_instances,), dtype=np.int32)
+    def get_y_train(self, num_instances, num_celltypes):
+        y_train = np.zeros((num_instances, num_celltypes), dtype=np.float32)
         return y_train
 
-    def get_da_train(self, model, num_instances, num_celltypes, num_features):
-        if isinstance(model, ConvNet):
-            da_train = np.zeros((num_instances, num_features, num_celltypes), dtype=np.float32)
-        else:
-            da_train = None
+    def get_da_train(self, num_instances, num_celltypes, num_features):
+        da_train = np.zeros((num_instances, num_features, num_celltypes), dtype=np.float32)
         return da_train
 
-    def get_y_test(self, model, num_instances):
-        if isinstance(model, ConvNet):
-            y_test = np.zeros((num_instances,), dtype=np.float16)
-        else:
-            y_test = np.zeros((num_instances,), dtype=np.int32)
+    def get_y_test(self, num_instances):
+        y_test = np.zeros((num_instances,), dtype=np.float32)
         return y_test
 
-    def get_da_test(self, model, num_instances, num_features):
-        if isinstance(model, ConvNet):
-            da_test = np.zeros((num_instances, num_features, 1), dtype=np.float16)
-        else:
-            da_test = None
+    def get_da_test(self, num_instances, num_features):
+        da_test = np.zeros((num_instances, num_features, 1), dtype=np.float32)
         return da_test
 
-    def save_model(self, X_train, S_train, da_train, da_train_val, y_train, y_train_val, run_id):
-        np.save(os.path.join(self.datapath, run_id+'Xtrain.npy'), X_train)
-        np.save(os.path.join(self.datapath, run_id + 'Strain.npy'),
-                S_train)
-        np.save(os.path.join(self.datapath, run_id +'datrain.npy'),
-                da_train)
-        np.save(
-            os.path.join(self.datapath, run_id + 'datrain_val.npy'),
-            da_train_val)
-        np.save(os.path.join(self.datapath, run_id + 'ytrain.npy'), y_train)
-        np.save(os.path.join(self.datapath, run_id + 'ytrain_val.npy'), y_train_val)
+    def get_X_data(self, sequence):
+        return self.datareader.sequence_to_one_hot(np.array(list(sequence)))
 
-    def load_model(self, run_id):
-        print "Loading train set from file"
-        X_train = np.load(os.path.join(self.datapath, run_id + 'Xtrain.npy'))
-        S_train = np.load(
-            os.path.join(self.datapath, run_id + 'Strain.npy'))
-        da_train = np.load(
-            os.path.join(self.datapath, run_id + 'datrain.npy'))
-        da_train_val = np.load(
-            os.path.join(self.datapath, run_id + 'datrain_val.npy'))
-        y_train = np.load(os.path.join(self.datapath, run_id + 'ytrain.npy'))
-        y_train_val = np.load(os.path.join(self.datapath, run_id + 'ytrain_val.npy'))
-        return X_train, S_train, da_train, da_train_val, y_train, y_train_val
-
-    def get_X_data(self, model, sequence):
-        if isinstance(model, ConvNet):
-            return self.datareader.sequence_to_one_hot(np.array(list(sequence)))
-        else:
-            return self.datareader.sequence_to_one_hot_transpose(np.array(list(sequence)))
-
-    def get_S_data(self, model, shape_features, bin_size):
+    def get_S_data(self, shape_features, bin_size):
         MGW = np.reshape(np.array(shape_features, dtype=np.float32), (bin_size, 4))
-        if isinstance(model, ConvNet):
-            return MGW
-        else:
-            return MGW.transpose()
+        return MGW
 
-    def get_y_train_data(self, model, labels):
-        if isinstance(model, ConvNet):
-            return labels[:, :-1]
-        else:
-            return np.max(labels.flatten()[:-1])
+    def get_y_train_data(self, labels):
+        return labels[:, :-1]
 
-    def get_da_train_data(self, model, features):
-        if isinstance(model, ConvNet):
-            return features[:, :-1]
-        else:
-            return None
+    def get_da_train_data(self, features):
+        return features[:, :-1]
 
-    def get_y_test_data(self, model, labels):
-        if isinstance(model, ConvNet):
-            return labels
-        else:
-            return np.max(labels)
+    def get_y_test_data(self, labels):
+        return labels
 
-    def get_da_test_data(self, model, features):
-        if isinstance(model, ConvNet):
-            return features
-        else:
-            return None
+    def get_da_test_data(self, features):
+        return features
 
     def make_ladder_predictions(self, model, transcription_factor, unbound_fraction=1.0, leaderboard=True):
         tf_leaderboard = {
@@ -364,11 +309,8 @@ class Evaluator:
             celltypes = self.datareader.get_celltypes_for_tf(transcription_factor)
             gene_expression_features = self.datareader.get_gene_expression_tpm(celltypes)
 
-            # Run training on full set
-            X_train = self.get_X(model, self.num_train_instances, self.bin_size)
-            S_train = self.get_S(model, self.num_train_instances, self.bin_size)
-            da_train = self.get_da_train(model, self.num_train_instances, len(celltypes), self.num_dnase_features)
-            y_train = self.get_y_train(model, self.num_train_instances, len(celltypes))
+            data = Data("ladder", "/data/models", self.bin_size, self.num_dnase_features, self.num_train_instances,
+                        len(celltypes))
 
             for idx, instance in enumerate(self.datareader.generate_cross_celltype(part, transcription_factor,
                                                                                    celltypes,
@@ -377,19 +319,19 @@ class Evaluator:
                                                                                    unbound_fraction=unbound_fraction,
                                                                                    ambiguous_as_bound=self.ambiguous_as_bound,
                                                                                    bin_size=self.bin_size,
-                                                                                   regression=self.regression)):
-                (_, _), sequence, shape_features, dnase_features, labels = instance
-                X_train[idx] = self.get_X_data(model, sequence)
-                y_train[idx] = self.get_y_test_data(model, labels)
-                S_train[idx] = self.get_S_data(model, shape_features, self.bin_size)
-                da_train[idx] = self.get_da_test_data(model, dnase_features)
+                                                                                   dnase_bin_size=self.dnase_bin_size,
+                                                                                   chipseq_bin_size=self.chipseq_bin_size
+                                                                                   )):
+                (_, _), sequence, shape_features, dnase_features, chipseq_fold_coverage, labels = instance
+                data.X_train[idx] = self.get_X_data(model, sequence)
+                data.y_train[idx] = self.get_y_test_data(model, labels)
+                data.S_train[idx] = self.get_S_data(model, shape_features, self.bin_size)
+                data.da_train[idx] = self.get_da_test_data(model, dnase_features)
+                data.chipseq_fold_coverage_train[idx] = chipseq_fold_coverage
 
-            model.fit(X_train, y_train, S_train, gene_expression_features, da_train)
+            model.fit(data.X_train, data.y_train, data.S_train, gene_expression_features, data.da_train, data.chipseq_fold_coverage_train)
 
-            del X_train
-            del S_train
-            del y_train
-            del da_train
+            del data
 
             # Make predictions
             with gzip.open(os.path.join(self.datapath, 'annotations/ladder_regions.blacklistfiltered.bed.gz')) as fin:
@@ -409,27 +351,19 @@ class Evaluator:
 
                 dnase_feature_handlers = []
                 for celltype in celltypes:
-                    f = open(os.path.join(self.datapath, 'preprocess/DNASE_FEATURES/%s_%s_%d.txt' % (celltype, part, bin_size)))
+                    f = open(os.path.join(self.datapath, 'preprocess/DNASE_FEATURES/%s_%s_%d.txt' % (celltype, part, self.dnase_bin_size)))
                     dnase_feature_handlers.append(f)
-
-                chipseq_feature_handlers = []
-                for celltype in celltypes:
-                    f = gzip.open(os.path.join(self.datapath, 'preprocess/CHIPSEQ_FEATURES/_%s_%s_%d' % (
-                    celltype, transcription_factor, bin_size)))
-                    chipseq_feature_handlers.append(f)
 
                 for l_idx, line in enumerate(fin):
                     dnase_feature_lines = []
                     for handler in dnase_feature_handlers:
                         dnase_feature_lines.append(handler.next())
-                    chipseq_feature_lines = []
-                    for handler in chipseq_feature_handlers:
-                        chipseq_feature_lines.append(handler.next())
 
                     if idx == 0:
                         X_test = self.get_X(model, min(test_batch_size, num_test_lines-l_idx), self.bin_size)
                         S_test = self.get_S(model, min(test_batch_size, num_test_lines-l_idx), self.bin_size)
                         da_test = self.get_da_test(model, min(test_batch_size, num_test_lines-l_idx), self.num_dnase_features)
+
                     tokens = line.split()
                     chromosome = tokens[0]
                     start = int(tokens[1])
@@ -495,24 +429,21 @@ class Evaluator:
 
         #--------------- TRAIN
         celltypes = self.datareader.get_celltypes_for_tf(transcription_factor)
-        self.num_train_instances = int(self.datareader.get_num_bound_lines(transcription_factor, self.ambiguous_as_bound)*(1+unbound_fraction))
+        self.num_train_instances = int(self.datareader.get_num_bound_lines(transcription_factor,
+                                                                           self.ambiguous_as_bound)*(1+unbound_fraction))
 
         model.set_transcription_factor(transcription_factor)
 
         celltypes_train = celltypes[:-1]
         celltypes_test = celltypes[-1]
 
-        run_id = transcription_factor + model.__class__.__name__ + \
-                 "_ub_" + str(unbound_fraction) + "_ab_" + str(self.ambiguous_as_bound) \
-                 + "bs" + str(self.bin_size) + "_reg_" + str(self.regression)
-
         model_path = os.path.join(self.datapath, 'models/')
-        data = Data(run_id, model_path, self.bin_size,
-                    self.num_dnase_features, self.num_train_instances, len(celltypes_train))
-        if not data.exists():
-            if self.show_progress:
-                bar = Bar('Loading train set', fill='#', suffix='%(percent)d%%', max=self.num_train_instances)
+        data = Data(model_path, transcription_factor, self.bin_size,
+                    self.dnase_bin_size, self.chipseq_bin_size, self.num_dnase_features,
+                    self.ambiguous_as_bound, num_train_instances=self.num_train_instances,
+                    num_train_celltypes=len(celltypes_train))
 
+        if not data.exists():
             for idx, instance in enumerate(self.datareader.generate_cross_celltype('train', transcription_factor,
                                                                                    celltypes,
                                                                                    self.num_dnase_features,
@@ -521,26 +452,25 @@ class Evaluator:
                                                                                    unbound_fraction=unbound_fraction,
                                                                                    ambiguous_as_bound=self.ambiguous_as_bound,
                                                                                    bin_size=self.bin_size,
-                                                                                   regression=self.regression
+                                                                                   celltypes_train=celltypes_train,
+                                                                                   dnase_bin_size=self.dnase_bin_size,
+                                                                                   chipseq_bin_size=self.chipseq_bin_size
                                                                                    )):
-                (_, _), sequence, shape_features, dnase_features, labels = instance
-                data.X_train[idx] = self.get_X_data(model, sequence)
-                data.S_train[idx] = self.get_S_data(model, shape_features, self.bin_size)
-                data.da_train[idx] = self.get_da_train_data(model, dnase_features)
+                (_, _), sequence, shape_features, dnase_features, chipseq_fold_coverage, labels = instance
+                data.X_train[idx] = self.get_X_data(sequence)
+                data.S_train[idx] = self.get_S_data(shape_features, self.bin_size)
+                data.da_train[idx] = self.get_da_train_data(dnase_features)
                 data.da_train_val[idx, :, :] = np.reshape(dnase_features[:, -1], (self.num_dnase_features, 1))
-                data.y_train[idx] = self.get_y_train_data(model, labels)
+                data.y_train[idx] = self.get_y_train_data(labels)
                 data.y_train_val[idx] = labels.flatten()[-1]
-                if self.show_progress:
-                    bar.next()
-
-            if self.show_progress:
-                bar.finish()
+                data.chipseq_fold_coverage_train = chipseq_fold_coverage
 
         if save_train_set:
             data.save_to_disk()
 
         gene_expression_features = self.datareader.get_gene_expression_tpm(celltypes_train)
-        model.fit(data.X_train, data.y_train, data.S_train, gene_expression_features, data.da_train)
+        model.fit(data.X_train, data.y_train, data.S_train,
+                  gene_expression_features, data.da_train, data.chipseq_fold_coverage_train)
 
         gene_expression_features = self.datareader.get_gene_expression_tpm(celltypes_test)
         predictions = model.predict(data.X_train, data.S_train, gene_expression_features, data.da_train_val)
@@ -572,15 +502,26 @@ class Evaluator:
         #run cached test sets
         for chromosome in copy.deepcopy(test_chromosomes):
             self.num_test_instances = self.datareader.get_num_instances(chromosome)
-            run_id = chromosome + transcription_factor + model.__class__.__name__ +\
-                     "_ub_" + str(unbound_fraction) + "_ab_" + str(self.ambiguous_as_bound) \
-                     + "bs" + str(self.bin_size) + "_reg_" + str(self.regression)
-            data = Data(run_id, model_path, self.bin_size,
-                        self.num_dnase_features, num_test_instances=self.num_test_instances)
+            data = Data(model_path, transcription_factor, self.bin_size, self.dnase_bin_size,
+                        self.chipseq_bin_size, self.num_dnase_features, self.ambiguous_as_bound, num_test_instances=self.num_test_instances,
+                        num_train_celltypes=len(celltypes_train))
             if data.exists():
                 print 'Results for test', chromosome
                 print 'num test instances', self.num_test_instances
                 y_pred = model.predict(data.X_test, data.S_test, gene_expression_features, data.da_test)
+                if self.debug:
+                    with open('../log/debug_'+transcription_factor+model.__class__.__name__+chromosome) as fout, \
+                            gzip.open('../data/annotations/train_regions.blacklistfiltered.bed.gz') as fin:
+                        idx = 0
+                        difference = np.abs(y_pred-data.y_test)
+                        for line in fin:
+                            tokens = line.split()
+                            chr_ = tokens[0]
+                            if chr_ == chromosome:
+                                start = tokens[1]
+                                end = tokens[2]
+                                print>>fout, chromosome, start, end, difference[idx]
+                                idx += 1
                 self.print_results(data.y_test, y_pred)
                 y_tot_test[t_idx:t_idx + self.num_test_instances] = data.y_test
                 y_tot_pred[t_idx:t_idx + self.num_test_instances] = y_pred
@@ -593,10 +534,12 @@ class Evaluator:
         for instance in self.datareader.generate_cross_celltype('train', transcription_factor,
                                                                 [celltypes_test],
                                                                 num_dnase_features=self.num_dnase_features,
-                                                                bin_size=self.bin_size,
-                                                                regression=self.regression):
+                                                                bin_size=self.bin_size, celltypes_train=celltypes_train,
+                                                                dnase_bin_size=self.dnase_bin_size, chipseq_bin_size=
+                                                                self.chipseq_bin_size):
 
-            (chromosome, start), sequence, shape_features, dnase_features, label = instance
+            (chromosome, start), sequence, shape_features, dnase_features, chipseq_fold_coverage, label = instance
+
             if len(test_chromosomes) == 0 or test_chromosomes[-1] < chromosome and curr_chr == '-1':
                 break
 
@@ -605,14 +548,9 @@ class Evaluator:
                 curr_chr = chromosome
                 self.num_test_instances = self.datareader.get_num_instances(chromosome)
 
-                run_id = curr_chr + transcription_factor + model.__class__.__name__ + \
-                         "_ub_" + str(unbound_fraction) + "_ab_" + str(self.ambiguous_as_bound) \
-                         + "bs" + str(self.bin_size) + "_reg_" + str(self.regression)
-                data = Data(run_id, model_path, self.bin_size,
-                            self.num_dnase_features, num_test_instances=self.num_test_instances)
-                if self.show_progress:
-                    finish_bar(bar)
-                    bar = Bar('Loading chromosome %s' % curr_chr, fill='#', suffix='%(percent)d%%', max=self.num_test_instances)
+                data = Data(model_path, transcription_factor, self.bin_size, self.dnase_bin_size, self.chipseq_bin_size,
+                            self.num_dnase_features, self.ambiguous_as_bound,
+                            num_test_instances=self.num_test_instances, num_train_celltypes=len(celltypes_train))
                 idx = 0
 
             elif curr_chr != chromosome and chromosome in test_chromosomes:
@@ -629,19 +567,12 @@ class Evaluator:
 
                 curr_chr = chromosome
                 self.num_test_instances = self.datareader.get_num_instances(chromosome)
-                run_id = curr_chr + transcription_factor + model.__class__.__name__ + \
-                         "_ub_" + str(unbound_fraction) + "_ab_" + str(self.ambiguous_as_bound) \
-                         + "bs" + str(self.bin_size) + "_reg_" + str(self.regression)
-                data = Data(run_id, model_path, self.bin_size,
-                            self.num_dnase_features, num_test_instances=self.num_test_instances)
-                if self.show_progress:
-                    finish_bar(bar)
-                    bar = Bar('Loading chromosome %s' % curr_chr, fill='#', suffix='%(percent)d%%', max=self.num_test_instances)
+                data = Data(model_path, transcription_factor, self.bin_size, self.dnase_bin_size,
+                            self.chipseq_bin_size, self.num_dnase_features, self.ambiguous_as_bound,
+                            num_test_instances=self.num_test_instances, num_train_celltypes=len(celltypes_train))
                 idx = 0
 
             elif curr_chr != '-1' and curr_chr != chromosome:
-
-                finish_bar(bar)
                 print 'Results for test', curr_chr
                 print 'num test instances', self.num_test_instances
                 y_pred = model.predict(data.X_test, data.S_test, gene_expression_features, data.da_test)
@@ -651,14 +582,14 @@ class Evaluator:
                 t_idx += self.num_test_instances
                 if save_valid_set:
                     data.save_to_disk()
-
                 curr_chr = '-1'
 
             if curr_chr == chromosome:
                 data.y_test[idx] = label
-                data.X_test[idx] = self.get_X_data(model, sequence)
-                data.S_test[idx] = self.get_S_data(model, shape_features, self.bin_size)
+                data.X_test[idx] = self.get_X_data(sequence)
+                data.S_test[idx] = self.get_S_data(shape_features, self.bin_size)
                 data.da_test[idx] = dnase_features
+                data.chipseq_fold_coverage_test[idx] = chipseq_fold_coverage
                 if self.show_progress:
                     bar.next()
                 idx += 1
@@ -672,36 +603,88 @@ class Evaluator:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--transcription_factors', '-tfs', help='Comma separated list of transcription factors', required=True)
-    parser.add_argument('--model', '-m', help='Choose model [TFC]', required=True)
+    parser.add_argument('--model', '-m', help='Choose model [TFC/RENS]', required=True)
+    parser.add_argument('--show_progress', '-sp', help="show progress in progress bar", action='store_true',
+                        required=False)
+    parser.add_argument('--save_validset', '-sv', help="save validation set", action='store_true', required=False)
+    parser.add_argument('--regression', '-reg', help='Use the chipseq signal strength as targets', action='store_true',
+                        required=False)
     parser.add_argument('--validate', '-v', action='store_true', help='run cross TF validation benchmark', required=False)
     parser.add_argument('--ladder', '-l', action='store_true', help='predict TF ladderboard', required=False)
     parser.add_argument('--test', '-t', action='store_true', help='predict TF final round', required=False)
+
+    # Individual models
     parser.add_argument('--config', '-c', help='configuration of model', required=False)
     parser.add_argument('--unbound_fraction', '-uf', help='unbound fraction in training', required=False)
     parser.add_argument('--num_epochs', '-ne', help='number of epochs', required=False)
     parser.add_argument('--ambiguous_bound', '-ab', action='store_true', help='treat ambiguous as bound', required=False)
     parser.add_argument('--bin_size', '-bs', help='Sequence bin size (must be an even number >= 200)', required=False)
-    parser.add_argument('--regression', '-reg', help='Use the chipseq signal strength as targets', action='store_true', required=False)
-    parser.add_argument('--show_progress', '-sp', help="show progress in progress bar", action='store_true', required=False)
-    parser.add_argument('--save_validset', '-sv', help="save validation set", action='store_true', required=False)
+    parser.add_argument('--dnase_bin_size', '-dbs', help='DNASE bin size', required=False)
+    parser.add_argument('--chipseq_bin_size', '-cbs', help='CHIPSEQ bin size', required=False)
+    parser.add_argument('--debug', '-dbg', help='Debug the model', action='store_true', required=False)
+
     args = parser.parse_args()
     model = None
 
     num_epochs = 1 if args.num_epochs is None else int(args.num_epochs)
     config = int(1 if args.config is None else args.config)
+
     bin_size = int(200 if args.bin_size is None else args.bin_size)
     bin_size -= bin_size % 2
+    dnase_bin_size = int(200 if args.dnase_bin_size is None else args.dnase_bin_size)
+    dnase_bin_size -= dnase_bin_size % 2
+    chipseq_bin_size = int(200 if args.chipseq_bin_size is None else args.chipseq_bin_size)
+    chipseq_bin_size -= chipseq_bin_size % 2
 
-    num_dnase_features = 1+3+bin_size/10
+    num_dnase_features = 1+3+dnase_bin_size/10
 
     if args.model == 'TFC':
         model = ConvNet('../log/', num_epochs=num_epochs, batch_size=512,
                         num_gen_expr_features=32, config=config, dropout_rate=0.25,
                         eval_size=0.2, num_shape_features=4, sequence_width=bin_size,
-                        num_dnase_features=num_dnase_features)
+                        num_dnase_features=num_dnase_features, regression=args.regression)
+
+    elif args.model == 'RENS':
+        model1 = ConvNet('../log/', num_epochs=num_epochs, batch_size=512,
+                        num_gen_expr_features=32, config=config, dropout_rate=0.25,
+                        eval_size=0.2, num_shape_features=4, sequence_width=bin_size,
+                        num_dnase_features=num_dnase_features, regression=args.regression, name='Convnet1')
+
+        model2 = ConvNet('../log/', num_epochs=num_epochs, batch_size=512,
+                        num_gen_expr_features=32, config=config, dropout_rate=0.25,
+                        eval_size=0.2, num_shape_features=4, sequence_width=bin_size,
+                        num_dnase_features=num_dnase_features, regression=args.regression, name='Convnet2')
+
+        model = RFEnsembler([model1, model2])
+
+    elif args.model == 'AVG':
+        model1 = ConvNet('../log/', num_epochs=num_epochs, batch_size=512,
+                         num_gen_expr_features=32, config=config, dropout_rate=0.25,
+                         eval_size=0.2, num_shape_features=4, sequence_width=bin_size,
+                         num_dnase_features=num_dnase_features, regression=args.regression, name='Convnet1')
+
+        model2 = ConvNet('../log/', num_epochs=num_epochs, batch_size=512,
+                         num_gen_expr_features=32, config=config, dropout_rate=0.25,
+                         eval_size=0.2, num_shape_features=4, sequence_width=bin_size,
+                         num_dnase_features=num_dnase_features, regression=args.regression, name='Convnet2')
+
+        model = AvgEnsembler([model1, model2])
+
+    elif args.model == 'RIDGE':
+        model1 = ConvNet('../log/', num_epochs=num_epochs, batch_size=512,
+                         num_gen_expr_features=32, config=config, dropout_rate=0.25,
+                         eval_size=0.2, num_shape_features=4, sequence_width=bin_size,
+                         num_dnase_features=num_dnase_features, regression=args.regression, name='Convnet1')
+
+        model2 = ConvNet('../log/', num_epochs=num_epochs, batch_size=512,
+                         num_gen_expr_features=32, config=config, dropout_rate=0.25,
+                         eval_size=0.2, num_shape_features=4, sequence_width=bin_size,
+                         num_dnase_features=num_dnase_features, regression=args.regression, name='Convnet2')
+
+        model = RidgeEnsembler([model1, model2])
 
     else:
-        print "Model options: TFC (TensorFlow Convnet)"
+        print "Model options: TFC (TensorFlow Convnet) / RENS (Random forest classifier ensemble)"
 
     unbound_fraction = 1.0
 
@@ -711,8 +694,10 @@ if __name__ == '__main__':
     if model is not None:
         transcription_factors = args.transcription_factors.split(',')
         evaluator = Evaluator('../data/', bin_size=bin_size,
-                              ambiguous_as_bound=args.ambiguous_bound, regression=args.regression,
-                              show_progress=args.show_progress, num_dnase_features=num_dnase_features)
+                              ambiguous_as_bound=args.ambiguous_bound,
+                              show_progress=args.show_progress, num_dnase_features=num_dnase_features,
+                              unbound_fraction=unbound_fraction, dnase_bin_size=dnase_bin_size,
+                              chipseq_bin_size=chipseq_bin_size)
         for transcription_factor in transcription_factors:
             if args.validate:
                 evaluator.run_cross_cell_benchmark(model, transcription_factor, save_train_set=True,

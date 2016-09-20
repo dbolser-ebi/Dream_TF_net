@@ -503,9 +503,201 @@ class DataReader:
             dnase_lists.append(l)
         return dnase_lists
 
+    def generate_position_tree(self, transcription_factor, celltypes, options=[],
+                                unbound_fraction=1, ambiguous_as_bound=False,
+                                bin_size=200, celltypes_train=None):
+        position_tree = set()  # keeps track of which lines (chr, start) to include
+
+        if CrossvalOptions.filter_on_DNase_peaks in options:
+            with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+                fin.readline()
+                dnase_peaks = self.get_DNAse_peaks(celltypes)
+                ordering = self.get_chromosome_ordering()
+                d_idx = 0
+                bin_length = 200
+                chr_dnase, start_dnase, _ = dnase_peaks[d_idx]
+                for line_idx, line in enumerate(fin):
+                    tokens = line.split()
+                    chromosome = tokens[0]
+                    start = int(tokens[1])
+                    while ordering[chr_dnase] < ordering[chromosome] \
+                            and d_idx < len(dnase_peaks) - 1:
+                        d_idx += 1
+                        (chr_dnase, start_dnase, _) = dnase_peaks[d_idx]
+                    while chr_dnase == chromosome and start_dnase + bin_length < start \
+                            and d_idx < len(dnase_peaks) - 1:
+                        d_idx += 1
+                    (chr_dnase, start_dnase, _) = dnase_peaks[d_idx]
+                    if chr_dnase == chromosome \
+                            and (start <= start_dnase + bin_length
+                                 and start_dnase <= start + bin_length):
+                        position_tree.add(line_idx)
+
+        elif CrossvalOptions.balance_peaks in options:
+            with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+                fin.readline()
+                bound_lines = []
+                unbound_lines = []
+                # only the train set
+                for line_idx, line in enumerate(fin):
+                    if 'B' in line or (ambiguous_as_bound and 'A' in line):
+                        bound_lines.append(line_idx)
+                    else:
+                        unbound_lines.append(line_idx)
+                random.shuffle(unbound_lines)
+                if unbound_fraction > 0:
+                    bound_lines.extend(
+                        unbound_lines[:int(min(len(bound_lines) * unbound_fraction, len(unbound_lines)))])
+                position_tree.update(set(bound_lines))
+
+        elif CrossvalOptions.random_shuffle_10_percent in options:
+            with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+                fin.readline()
+                a = range(len(fin.read().splitlines()))
+                random.shuffle(a)
+                position_tree.update(a[:int(0.1 * len(a))])
+
+        return position_tree
+
+    def generate_cross_sequence(self, transcription_factor, bin_size, position_tree):
+        with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+            bin_correction = max(0, (bin_size - 200) / 2)
+            for l_idx, line in enumerate(fin):
+                if len(position_tree) == 0 or l_idx in position_tree:
+                    tokens = line.split()
+                    start = int(tokens[1])
+                    chromosome = tokens[0]
+                    sequence = self.hg19[chromosome][start-bin_correction:start + self.sequence_length + bin_correction]
+                    yield (chromosome, start), sequence
+
+    def generate_cross_labels(self, transcription_factor, celltypes, ambiguous_as_bound, position_tree):
+        with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+            curr_chromosome = 'chr10'
+            celltype_names = fin.readline().split()[3:]
+            idxs = []
+
+            for i, celltype in enumerate(celltype_names):
+                if celltype in celltypes:
+                    idxs.append(i)
+
+            for l_idx, line in enumerate(fin):
+
+                if len(position_tree) == 0 or l_idx in position_tree:
+                    tokens = line.split()
+                    bound_states = tokens[3:]
+                    start = int(tokens[1])
+                    chromosome = tokens[0]
+                    labels = np.zeros((1, len(celltypes)), dtype=np.float32)
+
+                    for i, idx in enumerate(idxs):
+                        if bound_states[idx] == 'B' or (ambiguous_as_bound and bound_states[idx] == 'A'):
+                                labels[:, i] = 1
+
+                    yield (chromosome, start), labels
+
+    def generate_cross_dnase(self, part, transcription_factor, celltypes, bin_size, num_dnase_features, position_tree):
+        with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+            dnase_lists = self.get_DNAse_conservative_peak_lists(celltypes)
+            celltype_names = fin.readline().split()[3:]
+            idxs = []
+
+            for i, celltype in enumerate(celltype_names):
+                if celltype in celltypes:
+                    idxs.append(i)
+
+            dnase_feature_handlers = []
+            for celltype in celltypes:
+                f = gzip.open(os.path.join(self.datapath, 'preprocess/DNASE_FEATURES/%s_%s_%d.gz' % (celltype, part, bin_size)))
+                dnase_feature_handlers.append(f)
+
+            for l_idx, line in enumerate(fin):
+                dnase_feature_lines = []
+                for handler in dnase_feature_handlers:
+                    dnase_feature_lines.append(handler.next())
+
+                if len(position_tree) == 0 or l_idx in position_tree:
+                    tokens = line.split()
+                    start = int(tokens[1])
+                    chromosome = tokens[0]
+
+                    # find position in dnase on the left in sorted order
+                    dnase_labels = np.zeros((1, len(celltypes)), dtype=np.float32)
+                    for c_idx, celltype in enumerate(celltypes):
+                        dnase_pos = bisect.bisect_left(dnase_lists[c_idx], (chromosome, start, start+200))
+                        # check left
+                        if dnase_pos < len(dnase_lists[c_idx]):
+                            dnase_chr, dnase_start, dnase_end = dnase_lists[c_idx][dnase_pos]
+                            if dnase_start <= start+200 and start <= dnase_end:
+                                dnase_labels[:, c_idx] = 1
+                        # check right
+                        if dnase_pos + 1 < len(dnase_lists[c_idx]):
+                            dnase_chr, dnase_start, dnase_end = dnase_lists[c_idx][dnase_pos+1]
+                            if dnase_start <= start + 200 and start <= dnase_end:
+                                dnase_labels[:, c_idx] = 1
+
+                    # dnase fold coverage
+                    dnase_fold_coverage = np.zeros((num_dnase_features, len(celltypes)), dtype=np.float32)
+
+                    for c_idx, celltype in enumerate(celltypes):
+                        tokens = map(float, dnase_feature_lines[c_idx].split())[:num_dnase_features-1]
+                        dnase_fold_coverage[0, c_idx] = dnase_labels[0, c_idx]
+                        dnase_fold_coverage[1:, c_idx] = tokens
+
+                    yield (chromosome, start), dnase_fold_coverage
+
+            for handler in dnase_feature_handlers:
+                handler.close()
+
+    def generate_cross_shape(self, transcription_factor, bin_size, position_tree):
+        with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+            bin_correction = max(0, (bin_size - 200) / 2)
+            curr_chromosome = 'chr10'
+            shape_features = self.get_shape_features(curr_chromosome)
+
+            for l_idx, line in enumerate(fin):
+
+                if len(position_tree) == 0 or l_idx in position_tree:
+                    tokens = line.split()
+                    start = int(tokens[1])
+                    chromosome = tokens[0]
+
+                    if chromosome != curr_chromosome:
+                        curr_chromosome = chromosome
+                        shape_features = self.get_shape_features(curr_chromosome)
+
+                    yield (chromosome, start), shape_features[start-bin_correction:start+self.sequence_length+bin_correction]
+
+    def generate_cross_chipseq(self, transcription_factor, celltypes_train, bin_size, position_tree):
+        with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+            chipseq_feature_handlers = []
+            for celltype in celltypes_train:
+                f = gzip.open(os.path.join(self.datapath, 'preprocess/CHIPSEQ_FEATURES/%s_%s_%d.gz' % (celltype, transcription_factor, bin_size)))
+                chipseq_feature_handlers.append(f)
+
+            for l_idx, line in enumerate(fin):
+
+                chipseq_feature_lines = []
+                for handler in chipseq_feature_handlers:
+                    chipseq_feature_lines.append(handler.next())
+
+                if len(position_tree) == 0 or l_idx in position_tree:
+                    tokens = line.split()
+                    start = int(tokens[1])
+                    chromosome = tokens[0]
+
+                    # chipseq fold coverage
+                    chipseq_fold_coverage = np.zeros((1, len(celltypes_train)), dtype=np.float32)
+                    for i, idx in enumerate(celltypes_train):
+                        chipseq_fold_coverage[:, i] = chipseq_feature_lines[i]
+
+                    yield (chromosome, start), chipseq_fold_coverage
+
+            for handler in chipseq_feature_handlers:
+                handler.close()
+
     def generate_cross_celltype(self, part, transcription_factor, celltypes, num_dnase_features, options=[],
                                 unbound_fraction=1, ambiguous_as_bound=False,
-                                bin_size=200, regression=False):
+                                bin_size=200, celltypes_train=None, dnase_bin_size=200, chipseq_bin_size=200):
         position_tree = set()  # keeps track of which lines (chr, start) to include
 
         if CrossvalOptions.filter_on_DNase_peaks in options:
@@ -570,14 +762,13 @@ class DataReader:
 
             dnase_feature_handlers = []
             for celltype in celltypes:
-                f = gzip.open(os.path.join(self.datapath, 'preprocess/DNASE_FEATURES/%s_%s_%d.gz' % (celltype, part, bin_size)))
+                f = gzip.open(os.path.join(self.datapath, 'preprocess/DNASE_FEATURES/%s_%s_%d.gz' % (celltype, part, dnase_bin_size)))
                 dnase_feature_handlers.append(f)
 
             chipseq_feature_handlers = []
-            if regression:
-                for celltype in celltypes:
-                    f = gzip.open(os.path.join(self.datapath, 'preprocess/CHIPSEQ_FEATURES/%s_%s_%d.gz' % (celltype, transcription_factor, bin_size)))
-                    chipseq_feature_handlers.append(f)
+            for celltype in celltypes_train:
+                f = gzip.open(os.path.join(self.datapath, 'preprocess/CHIPSEQ_FEATURES/%s_%s_%d.gz' % (celltype, transcription_factor, chipseq_bin_size)))
+                chipseq_feature_handlers.append(f)
 
             for l_idx, line in enumerate(fin):
                 dnase_feature_lines = []
@@ -616,8 +807,6 @@ class DataReader:
                     for c_idx, celltype in enumerate(celltypes):
                         tokens = map(float, dnase_feature_lines[c_idx].split())[:num_dnase_features-1]
                         dnase_fold_coverage[0, c_idx] = dnase_labels[0, c_idx]
-                        #for t_idx, token in enumerate(tokens):
-                        #    dnase_fold_coverage[t_idx+1, c_idx] = token
                         dnase_fold_coverage[1:, c_idx] = tokens
 
                     if chromosome != curr_chromosome:
@@ -625,17 +814,22 @@ class DataReader:
                         shape_features = self.get_shape_features(curr_chromosome)
 
                     for i, idx in enumerate(idxs):
-                        if regression:
-                            labels[:, i] = chipseq_feature_lines[i]
-                        else:
-                            if bound_states[idx] == 'B' or (ambiguous_as_bound and bound_states[idx] == 'A'):
+                        if bound_states[idx] == 'B' or (ambiguous_as_bound and bound_states[idx] == 'A'):
                                 labels[:, i] = 1
+
+                    # chipseq fold coverage
+                    chipseq_fold_coverage = np.zeros((1, len(celltypes_train)), dtype=np.float32)
+                    for i, idx in enumerate(celltypes_train):
+                        chipseq_fold_coverage[:, i] = chipseq_feature_lines[i]
 
                     yield (chromosome, start), sequence, \
                           shape_features[start-bin_correction:start+self.sequence_length+bin_correction], \
-                        dnase_fold_coverage, labels
+                        dnase_fold_coverage, chipseq_fold_coverage, labels
 
             for handler in dnase_feature_handlers:
+                handler.close()
+
+            for handler in chipseq_feature_handlers:
                 handler.close()
 
 if __name__ == '__main__':

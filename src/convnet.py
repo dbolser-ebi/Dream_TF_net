@@ -82,9 +82,11 @@ class ConvNet:
     def __init__(self, model_dir, batch_size=256, num_channels=4, num_epochs=2,
                  sequence_width=200, num_outputs=1, eval_size=0.2, early_stopping=100,
                  num_gen_expr_features=57820, num_dnase_features=4, num_shape_features=4, dropout_rate=.5,
-                 config=1, verbose=True, datapath ='../data/', transcription_factor='CTCF', regression=False):
+                 config=1, verbose=True, datapath ='../data/', transcription_factor='CTCF', regression=False,
+                 name='convnet'):
         if config is None:
             config = 1
+        self.name = name
         self.regression = regression
         self.datareader = DataReader(datapath)
         self.config = config
@@ -111,139 +113,137 @@ class ConvNet:
         self.early_stopping = EarlyStopping(max_stalls=early_stopping)
         self.dropout_rate = dropout_rate
         self.transcription_factor = transcription_factor
-        self.logits, self.summary_op = self.get_model()
+        self.logits = self.get_model()
 
     def set_transcription_factor(self, transcription_factor):
         self.transcription_factor = transcription_factor
 
     def get_model(self):
-        with tf.variable_scope('DNASE') as scope:
-            dnase_features = self.tf_dnase_features
+        with tf.variable_scope(self.name) as main_scope:
+            with tf.variable_scope('DNASE') as scope:
+                dnase_features = self.tf_dnase_features
 
-        with tf.variable_scope('USUAL_SUSPECTS') as scope:
-            activations = []
+            with tf.variable_scope('USUAL_SUSPECTS') as scope:
+                activations = []
 
-            def get_activations_for_tf(transcription_factor):
-                result = []
-                motifs = self.datareader.get_motifs_h(transcription_factor)
-                if len(motifs) > 0:
-                    with tf.variable_scope(transcription_factor) as tfscope:
-                        for idx, pssm in enumerate(motifs):
-                            usual_conv_kernel = \
-                                tf.get_variable('motif_%d' % idx,
-                                                shape=(1, pssm.shape[0], pssm.shape[1], 1), dtype=tf.float32,
-                                                initializer=tf.constant_initializer(pssm))
-                            depth = 1
-                            filter_width = pssm.shape[0]
-                            conv_biases = tf.zeros(shape=[depth])
-                            stride = 1
-                            conv = conv1D(self.tf_sequence, usual_conv_kernel, strides=[1, 1, stride, 1])
-                            num_nodes = (self.sequence_width - filter_width) / stride + 1
-                            denominator = 4
-                            for div in range(4, 10):
-                                if num_nodes % div == 0:
-                                    denominator = div
-                                    break
-                            activation = tf.nn.bias_add(conv, conv_biases)
-                            pooled = tf.nn.relu(max_pool_1xn(activation, num_nodes / denominator))
-                            result.append(flatten(pooled))
-                return result
+                def get_activations_for_tf(transcription_factor):
+                    result = []
+                    motifs = self.datareader.get_motifs_h(transcription_factor)
+                    if len(motifs) > 0:
+                        with tf.variable_scope(transcription_factor) as tfscope:
+                            for idx, pssm in enumerate(motifs):
+                                usual_conv_kernel = \
+                                    tf.get_variable('motif_%d' % idx,
+                                                    shape=(1, pssm.shape[0], pssm.shape[1], 1), dtype=tf.float32,
+                                                    initializer=tf.constant_initializer(pssm))
+                                depth = 1
+                                filter_width = pssm.shape[0]
+                                conv_biases = tf.zeros(shape=[depth])
+                                stride = 1
+                                conv = conv1D(self.tf_sequence, usual_conv_kernel, strides=[1, 1, stride, 1])
+                                num_nodes = (self.sequence_width - filter_width) / stride + 1
+                                denominator = 4
+                                for div in range(4, 10):
+                                    if num_nodes % div == 0:
+                                        denominator = div
+                                        break
+                                activation = tf.nn.bias_add(conv, conv_biases)
+                                pooled = tf.nn.relu(max_pool_1xn(activation, num_nodes / denominator))
+                                result.append(flatten(pooled))
+                    return result
 
-            if int(self.config) == int(configuration.SEQ_SHAPE_SPECIFICUSUAL) or int(self.config) == int(configuration.USUAL_DNASE):
-                activations.extend(get_activations_for_tf(self.transcription_factor))
-            else:
-                for transcription_factor in self.datareader.get_tfs():
-                    activations.extend(get_activations_for_tf(transcription_factor))
+                if int(self.config) == int(configuration.SEQ_SHAPE_SPECIFICUSUAL) or int(self.config) == int(configuration.USUAL_DNASE):
+                    activations.extend(get_activations_for_tf(self.transcription_factor))
+                else:
+                    for transcription_factor in self.datareader.get_tfs():
+                        activations.extend(get_activations_for_tf(transcription_factor))
 
-            with tf.variable_scope('fc100') as fcscope:
-                drop_usual = fully_connected(tf.concat(1, activations), 100)
+                with tf.variable_scope('fc100') as fcscope:
+                    drop_usual = fully_connected(tf.concat(1, activations), 100)
 
-        with tf.variable_scope('GENEXPR') as scope:
+            with tf.variable_scope('GENEXPR') as scope:
 
-            with tf.variable_scope('fc100') as fcscope:
-                drop_genexpr = fully_connected(tf.tile(self.tf_gene_expression, [self.batch_size, 1]), 100)
+                with tf.variable_scope('fc100') as fcscope:
+                    drop_genexpr = fully_connected(tf.tile(self.tf_gene_expression, [self.batch_size, 1]), 100)
 
-        with tf.variable_scope('SHAPE') as scope:
-            with tf.variable_scope('conv15_10') as convscope:
-                depth = 10
-                width = 15
-                shape_conv_kernel = weight_variable(shape=[self.height, width, self.num_shape_features, depth])
-                conv_biases = weight_variable(shape=[depth])
-                conv = conv1D(self.tf_shape, shape_conv_kernel)
-                activation = tf.nn.bias_add(conv, conv_biases)
+            with tf.variable_scope('SHAPE') as scope:
+                with tf.variable_scope('conv15_10') as convscope:
+                    depth = 10
+                    width = 15
+                    shape_conv_kernel = weight_variable(shape=[self.height, width, self.num_shape_features, depth])
+                    conv_biases = weight_variable(shape=[depth])
+                    conv = conv1D(self.tf_shape, shape_conv_kernel)
+                    activation = tf.nn.bias_add(conv, conv_biases)
 
-            with tf.variable_scope('pool35') as poolscope:
-                pool_width = 35
-                pool = tf.nn.relu(max_pool_1xn(activation, pool_width))
+                with tf.variable_scope('pool35') as poolscope:
+                    pool_width = 35
+                    pool = tf.nn.relu(max_pool_1xn(activation, pool_width))
 
-            with tf.variable_scope('fc100') as fcscope:
-                flattened = flatten(pool)
-                drop_shape = fully_connected(flattened, 100)
+                with tf.variable_scope('fc100') as fcscope:
+                    flattened = flatten(pool)
+                    drop_shape = fully_connected(flattened, 100)
 
-        with tf.variable_scope('R_MOTIF') as scope:
-            with tf.variable_scope('conv15_15') as convscope:
-                depth = 30
-                width = 15
-                rmotif_conv_kernel = weight_variable(shape=[self.height, width, self.num_channels, depth])
+            with tf.variable_scope('R_MOTIF') as scope:
+                with tf.variable_scope('conv15_15') as convscope:
+                    depth = 30
+                    width = 15
+                    rmotif_conv_kernel = weight_variable(shape=[self.height, width, self.num_channels, depth])
 
-                conv_biases = weight_variable(shape=[depth])
-                conv = conv1D(self.tf_sequence, rmotif_conv_kernel)
-                activation = tf.nn.bias_add(conv, conv_biases)
+                    conv_biases = weight_variable(shape=[depth])
+                    conv = conv1D(self.tf_sequence, rmotif_conv_kernel)
+                    activation = tf.nn.bias_add(conv, conv_biases)
 
-            with tf.variable_scope('pool35') as poolscope:
-                pool_width = 35
-                pool = tf.nn.relu(max_pool_1xn(activation, pool_width))
+                with tf.variable_scope('pool35') as poolscope:
+                    pool_width = 35
+                    pool = tf.nn.relu(max_pool_1xn(activation, pool_width))
 
-            with tf.variable_scope('fc100') as fcscope:
-                flattened = flatten(pool)
-                drop_rmotif = fully_connected(flattened, 100)
+                with tf.variable_scope('fc100') as fcscope:
+                    flattened = flatten(pool)
+                    drop_rmotif = fully_connected(flattened, 100)
 
-        with tf.variable_scope('MERGE') as scope:
-            with tf.variable_scope('merge_drop') as mergescope:
-                if self.config == int(configuration.SEQ):
-                    merged = tf.concat(1, [drop_rmotif])
-                elif self.config == int(configuration.SEQ_SHAPE):
-                    merged = tf.concat(1, [drop_rmotif, drop_shape])
-                elif self.config == int(configuration.SEQ_SHAPE_GENEXPR):
-                    merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr])
-                elif self.config == int(configuration.SEQ_SHAPE_GENEXPR_ALLUSUAL):
-                    merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr, drop_usual])
-                elif self.config == int(configuration.SEQ_SHAPE_SPECIFICUSUAL):
-                    merged = tf.concat(1, [drop_rmotif, drop_shape, drop_usual])
-                elif self.config == int(configuration.SEQ_SHAPE_GENEXPR_ALLUSUAL_DNASE):
-                    merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr, drop_usual, dnase_features])
-                elif self.config == int(configuration.SEQ_DNASE):
-                    merged = tf.concat(1, [drop_rmotif, dnase_features])
-                elif self.config == int(configuration.SEQ_DNASE_SHAPE):
-                    merged = tf.concat(1, [drop_rmotif, dnase_features, drop_shape])
-                elif self.config == int(configuration.SEQ_DNASE_SHAPE_ALLUSUAL):
-                    merged = tf.concat(1, [drop_rmotif, dnase_features, drop_shape, drop_usual])
-                elif self.config == int(configuration.USUAL_DNASE):
-                    merged = tf.concat(1, [drop_usual, dnase_features])
+            with tf.variable_scope('MERGE') as scope:
+                with tf.variable_scope('merge_drop') as mergescope:
+                    if self.config == int(configuration.SEQ):
+                        merged = tf.concat(1, [drop_rmotif])
+                    elif self.config == int(configuration.SEQ_SHAPE):
+                        merged = tf.concat(1, [drop_rmotif, drop_shape])
+                    elif self.config == int(configuration.SEQ_SHAPE_GENEXPR):
+                        merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr])
+                    elif self.config == int(configuration.SEQ_SHAPE_GENEXPR_ALLUSUAL):
+                        merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr, drop_usual])
+                    elif self.config == int(configuration.SEQ_SHAPE_SPECIFICUSUAL):
+                        merged = tf.concat(1, [drop_rmotif, drop_shape, drop_usual])
+                    elif self.config == int(configuration.SEQ_SHAPE_GENEXPR_ALLUSUAL_DNASE):
+                        merged = tf.concat(1, [drop_rmotif, drop_shape, drop_genexpr, drop_usual, dnase_features])
+                    elif self.config == int(configuration.SEQ_DNASE):
+                        merged = tf.concat(1, [drop_rmotif, dnase_features])
+                    elif self.config == int(configuration.SEQ_DNASE_SHAPE):
+                        merged = tf.concat(1, [drop_rmotif, dnase_features, drop_shape])
+                    elif self.config == int(configuration.SEQ_DNASE_SHAPE_ALLUSUAL):
+                        merged = tf.concat(1, [drop_rmotif, dnase_features, drop_shape, drop_usual])
+                    elif self.config == int(configuration.USUAL_DNASE):
+                        merged = tf.concat(1, [drop_usual, dnase_features])
 
-            with tf.variable_scope('fc') as fcscope:
-                activation = fully_connected(merged, 1000)
-                drop = tf.nn.dropout(activation, self.keep_prob)
+                with tf.variable_scope('fc') as fcscope:
+                    activation = fully_connected(merged, 1000)
+                    drop = tf.nn.dropout(activation, self.keep_prob)
 
-            with tf.variable_scope('output') as outscope:
-                logits = fully_connected(drop, 1, None, variables_collections='test')
+                with tf.variable_scope('output') as outscope:
+                    logits = fully_connected(drop, 1, None, variables_collections='test')
 
-        # TENSORBOARD SUMMARY INFO
-        conv_kernel_h2 = tf.histogram_summary('rmotif histogram', rmotif_conv_kernel)
-        merged_summary = tf.merge_all_summaries()
+        return logits
 
-        return logits, merged_summary
-
-    def fit(self, X, y, S=None, gene_expression=None, da=None, y_quant=None):
+    def fit(self, X, y, S=None, gene_expression=None, da=None, chipseq_fold_coverage=None):
         summary_writer = tf.train.SummaryWriter(self.model_dir + 'train')
         try:
-            if self.regression:
-                loss = calc_regression_loss(self.logits, self.tf_train_labels)
-            else:
-                loss = calc_loss(self.logits, self.tf_train_labels)
-            optimizer = tf.train.AdamOptimizer(learning_rate=0.001, beta1=0.9, beta2=0.999).minimize(loss)
+            with tf.variable_scope(self.name+'_opt') as scope:
+                if self.regression:
+                    loss = calc_regression_loss(self.logits, self.tf_train_labels)
+                else:
+                    loss = calc_loss(self.logits, self.tf_train_labels)
+                optimizer = tf.train.AdamOptimizer(learning_rate=0.001, beta1=0.9, beta2=0.999).minimize(loss)
 
-            saver = tf.train.Saver()
+            saver = tf.train.Saver([var for var in tf.get_collection(tf.GraphKeys.VARIABLES) if var.op.name.startswith(self.name)])
 
             if self.regression:
                 kf = KFold(y.size, round(1. / self.eval_size))
@@ -294,7 +294,7 @@ class ConvNet:
                             batch_shapes = np.reshape(S_train[offset:end, :],
                                                       (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
                             batch_labels = np.reshape(y_train[offset:end, celltype_idx], (self.batch_size, 1))
-                            batch_dnase_features = np.reshape(da_train[offset:end, :, celltype_idx], (self.batch_size, self.num_dnase_features))
+                            batch_dnase_features = np.reshape(da_train[offset:end, :self.num_dnase_features, celltype_idx], (self.batch_size, self.num_dnase_features))
                             feed_dict = {self.tf_sequence: batch_sequence,
                                          self.tf_shape: batch_shapes,
                                          self.tf_train_labels: batch_labels,
@@ -304,9 +304,7 @@ class ConvNet:
                                          self.keep_prob: 1-self.dropout_rate,
                                          self.tf_dnase_features: batch_dnase_features
                                          }
-                            summary, _, r_loss = session.run([self.summary_op, optimizer, loss], feed_dict=feed_dict)
-                            if self.model_dir is not None:
-                                summary_writer.add_summary(summary)
+                            _, r_loss = session.run([optimizer, loss], feed_dict=feed_dict)
                             losses.append(r_loss)
                     losses = np.array(losses)
                     t_loss = np.mean(losses)
@@ -327,7 +325,7 @@ class ConvNet:
                             batch_shapes = np.reshape(S_val[offset:end, :],
                                                       (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
                             batch_labels = np.reshape(y_val[offset:end, celltype_idx], (self.batch_size, 1))
-                            batch_dnase_features = np.reshape(da_val[offset:end, :, celltype_idx], (self.batch_size, self.num_dnase_features))
+                            batch_dnase_features = np.reshape(da_val[offset:end, :self.num_dnase_features, celltype_idx], (self.batch_size, self.num_dnase_features))
                             feed_dict = {self.tf_sequence: batch_sequence,
                                          self.tf_shape: batch_shapes,
                                          self.tf_train_labels: batch_labels,
@@ -346,8 +344,8 @@ class ConvNet:
                     early_score = self.early_stopping.update(v_loss)
                     if early_score == 2:
                         # Use the best model on validation
-                        saver.save(session, self.model_dir + 'conv%s%d%d%d.ckpt'
-                                   % (self.transcription_factor, self.config,
+                        saver.save(session, self.model_dir + 'conv%s%s%d%d%d.ckpt'
+                                   % (self.name, self.transcription_factor, self.config,
                                       self.num_dnase_features, self.sequence_width))
                         if self.verbose:
                             print (bcolors.OKCYAN+"%d\t%f\t%f\t%.2f%%\t\t%ds"+bcolors.ENDC) % \
@@ -375,11 +373,12 @@ class ConvNet:
         else:
             prediction_op = tf.nn.sigmoid(self.logits)
         num_examples = X.shape[0]
-        saver = tf.train.Saver()
+        saver = tf.train.Saver(
+            [var for var in tf.get_collection(tf.GraphKeys.VARIABLES) if var.op.name.startswith(self.name)])
         predictions = []
         with tf.Session() as session:
-            saver.restore(session, self.model_dir+'conv%s%d%d%d.ckpt'
-                          % (self.transcription_factor, self.config,
+            saver.restore(session, self.model_dir+'conv%s%s%d%d%d.ckpt'
+                          % (self.name, self.transcription_factor, self.config,
                              self.num_dnase_features, self.sequence_width))
             for offset in xrange(0, num_examples, self.batch_size):
                 end = min(offset + self.batch_size, num_examples)
@@ -389,7 +388,7 @@ class ConvNet:
                 batch_shapes = np.reshape(S[offset_:end, :],
                                           (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
 
-                batch_da_features = np.reshape(da[offset_:end, :, 0],
+                batch_da_features = np.reshape(da[offset_:end, :self.num_dnase_features, 0],
                                       (self.batch_size, self.num_dnase_features))
                 feed_dict = {self.tf_sequence: batch_sequence,
                              self.tf_shape: batch_shapes,
