@@ -683,6 +683,12 @@ if __name__ == '__main__':
 
         model = RidgeEnsembler([model1, model2])
 
+    elif args.model == 'XGB':
+         model = XGBoost(batch_size=512,
+                         config=config,
+                         sequence_width=bin_size,
+                         )
+
     else:
         print "Model options: TFC (TensorFlow Convnet) / RENS (Random forest classifier ensemble)"
 
