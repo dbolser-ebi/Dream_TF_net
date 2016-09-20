@@ -406,9 +406,8 @@ class ConvNet:
         return predictions
 
 
-
 class XGBoost:
-    def __init__(self, batch_size=256, sequence_width=200,config=1,transcription_factor='CTCF',
+    def __init__(self, batch_size=256, sequence_width=200, config=1, transcription_factor='CTCF',
                     num_channels=4, height=1, datapath='../data/'):
         self.height = height
         self.num_channels = num_channels
@@ -431,31 +430,41 @@ class XGBoost:
         with tf.Session() as sess:
             sess.run(tf.initialize_all_variables())
             for i in range(number_of_batches):
-                batch_activations = sess.run(self.activations, feed_dict={self.tf_sequence:X[self.batch_size*i:self.batch_size*i+self.batch_size].reshape(self.batch_size,1,200,4)})
+                batch_activations = sess.run(self.activations, feed_dict={self.tf_sequence:
+                                                                              X[self.batch_size*i:
+                                                                              self.batch_size*i+self.batch_size].
+                                             reshape(self.batch_size, self.height, self.sequence_width,
+                                                     self.num_channels)}
+                                             )
                 batch_activations = np.concatenate(batch_activations, axis=1)
                 activations.append(batch_activations)
             if offset != 0:
-                zero_array = np.zeros([self.batch_size - offset,self.sequence_width,4])
+                zero_array = np.zeros([self.batch_size - offset, self.sequence_width, self.num_channels])
                 final_chunk = np.concatenate([X[self.batch_size*(i+1):], zero_array])
-                batch_activations = sess.run(self.activations, feed_dict={self.tf_sequence:final_chunk.reshape(self.batch_size,1,200,4)})
+                batch_activations = sess.run(self.activations,
+                                             feed_dict={self.tf_sequence:final_chunk.reshape(
+                                                 self.batch_size,
+                                                 self.height,
+                                                 self.sequence_width,
+                                                 self.num_channels)})
                 batch_activations = np.concatenate(batch_activations, axis=1)
                 activations.append(batch_activations)
 
         activations = np.concatenate(activations)
         activations = activations[:offset-self.batch_size]
-        da_features = np.concatenate([da[:,:,i] for i in range(da.shape[2])])
+        da_features = np.concatenate([da[:, :, i] for i in range(da.shape[2])])
         full_activations = np.concatenate(([activations] * da.shape[2]))
         full_features = np.concatenate([full_activations, da_features], axis=1)
-        full_y = np.concatenate([y[:,i] for i in range(y.shape[1])])
+        full_y = np.concatenate([y[:, i] for i in range(y.shape[1])])
 
 
         dtrain = xgb.DMatrix(full_features, full_y)
-        param = {'bst:max_depth':2, 'bst:eta':1, 'silent':1, 'objective':'binary:logistic' }
+        param = {'bst:max_depth':2, 'bst:eta':1, 'silent':1, 'objective':'binary:logistic'}
         param['nthread'] = 4
         param['eval_metric'] = 'auc'
         plst = param.items()
         num_round = 10
-        bst = xgb.train( plst, dtrain, num_round)
+        bst = xgb.train(plst, dtrain, num_round)
         self.model = bst
         print 'XGBoost trained'
 
@@ -471,20 +480,30 @@ class XGBoost:
         with tf.Session() as sess:
             sess.run(tf.initialize_all_variables())
             for i in range(number_of_batches):
-                batch_activations = sess.run(self.activations, feed_dict={self.tf_sequence:X[self.batch_size*i:self.batch_size*i+self.batch_size].reshape(self.batch_size,1,200,4)})
+                batch_activations = sess.run(self.activations,
+                                             feed_dict={
+                                                 self.tf_sequence:
+                                                     X[self.batch_size*i:
+                                                       self.batch_size*i+self.batch_size].reshape(
+                                                       self.batch_size, self.height,
+                                                       self.sequence_width, self.num_channels)}
+                                             )
                 batch_activations = np.concatenate(batch_activations, axis=1)
                 activations.append(batch_activations)
             if offset != 0:
-                zero_array = np.zeros([self.batch_size - offset,200,4])
+                zero_array = np.zeros([self.batch_size - offset, self.sequence_width, self.num_channels])
                 final_chunk = np.concatenate([X[self.batch_size*(i+1):], zero_array])
-                batch_activations = sess.run(self.activations, feed_dict={self.tf_sequence:final_chunk.reshape(self.batch_size,1,200,4)})
+                batch_activations = sess.run(self.activations,
+                                             feed_dict={self.tf_sequence:final_chunk.reshape(self.batch_size,
+                                                                                             self.height,
+                                                                                             self.sequence_width,
+                                                                                             self.num_channels)})
                 batch_activations = np.concatenate(batch_activations, axis=1)
                 activations.append(batch_activations)
 
-
         activations = np.concatenate(activations)
         activations = activations[:offset-self.batch_size]
-        da_features = da.reshape(X.shape[0],-1)
+        da_features = da.reshape(X.shape[0], -1)
         features = np.concatenate([activations, da_features], axis=1)
         d_test = xgb.DMatrix(features)
         return self.model.predict(d_test)
