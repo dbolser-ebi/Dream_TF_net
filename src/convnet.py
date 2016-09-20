@@ -405,3 +405,125 @@ class ConvNet:
         return predictions
 
 
+
+class XGBoost:
+    def __init__(self, batch_size=256, sequence_width=200,config=1,transcription_factor='CTCF',
+                    num_channels=4, height=1, datapath='../data/'):
+        self.height = height
+        self.num_channels = num_channels
+        self.tf_sequence = tf.placeholder(tf.float32, shape=(batch_size, self.height,
+                                          sequence_width, self.num_channels), name='sequences')
+        self.batch_size = batch_size
+        self.sequence_width = sequence_width
+        self.datareader = DataReader(datapath)
+        self.config = config
+        self.transcription_factor = transcription_factor
+        self.activations, self.summary_op = self.get_activations()
+
+    def set_transcription_factor(self, transcription_factor):
+        self.transcription_factor = transcription_factor
+
+    def fit(self, X, y, S=None, gene_expression=None, da=None, y_quant=None):
+        activations = []
+        number_of_batches = X.shape[0] / self.batch_size
+        offset = X.shape[0] % self.batch_size
+        with tf.Session() as sess:
+            sess.run(tf.initialize_all_variables())
+            for i in range(number_of_batches):
+                batch_activations = sess.run(self.activations, feed_dict={self.tf_sequence:X[self.batch_size*i:self.batch_size*i+self.batch_size].reshape(self.batch_size,1,200,4)})
+                batch_activations = np.concatenate(batch_activations, axis=1)
+                activations.append(batch_activations)
+            if offset != 0:
+                zero_array = np.zeros([self.batch_size - offset,self.sequence_width,4])
+                final_chunk = np.concatenate([X[self.batch_size*(i+1):], zero_array])
+                batch_activations = sess.run(self.activations, feed_dict={self.tf_sequence:final_chunk.reshape(self.batch_size,1,200,4)})
+                batch_activations = np.concatenate(batch_activations, axis=1)
+                activations.append(batch_activations)
+
+        activations = np.concatenate(activations)
+        activations = activations[:offset-self.batch_size]
+        da_features = np.concatenate([da[:,:,i] for i in range(da.shape[2])])
+        full_activations = np.concatenate(([activations] * da.shape[2]))
+        full_features = np.concatenate([full_activations, da_features], axis=1)
+        full_y = np.concatenate([y[:,i] for i in range(y.shape[1])])
+
+
+        dtrain = xgb.DMatrix(full_features, full_y)
+        param = {'bst:max_depth':2, 'bst:eta':1, 'silent':1, 'objective':'binary:logistic' }
+        param['nthread'] = 4
+        param['eval_metric'] = 'auc'
+        plst = param.items()
+        num_round = 10
+        bst = xgb.train( plst, dtrain, num_round)
+        self.model = bst
+        print 'XGBoost trained'
+
+    def predict(self, X, S=None, gene_expression=None, da=None):
+        '''
+        run trained model
+        :return: predictions
+        '''
+
+        activations = []
+        number_of_batches = X.shape[0] / self.batch_size
+        offset = X.shape[0] % self.batch_size
+        with tf.Session() as sess:
+            sess.run(tf.initialize_all_variables())
+            for i in range(number_of_batches):
+                batch_activations = sess.run(self.activations, feed_dict={self.tf_sequence:X[self.batch_size*i:self.batch_size*i+self.batch_size].reshape(self.batch_size,1,200,4)})
+                batch_activations = np.concatenate(batch_activations, axis=1)
+                activations.append(batch_activations)
+            if offset != 0:
+                zero_array = np.zeros([self.batch_size - offset,200,4])
+                final_chunk = np.concatenate([X[self.batch_size*(i+1):], zero_array])
+                batch_activations = sess.run(self.activations, feed_dict={self.tf_sequence:final_chunk.reshape(self.batch_size,1,200,4)})
+                batch_activations = np.concatenate(batch_activations, axis=1)
+                activations.append(batch_activations)
+
+
+        activations = np.concatenate(activations)
+        activations = activations[:offset-self.batch_size]
+        da_features = da.reshape(X.shape[0],-1)
+        features = np.concatenate([activations, da_features], axis=1)
+        d_test = xgb.DMatrix(features)
+        return self.model.predict(d_test)
+
+    def get_activations(self):
+        # with tf.variable_scope('DNASE') as scope:
+            # dnase_features = self.tf_dnase_features
+
+        with tf.variable_scope('USUAL_SUSPECTS') as scope:
+            activations = []
+
+            def get_activations_for_tf(transcription_factor):
+                result = []
+                motifs = self.datareader.get_motifs_h(transcription_factor)
+                if len(motifs) > 0:
+                    with tf.variable_scope(transcription_factor) as tfscope:
+                        for idx, pssm in enumerate(motifs):
+                            usual_conv_kernel = \
+                                tf.get_variable('motif_%d' % idx,
+                                                shape=(1, pssm.shape[0], pssm.shape[1], 1), dtype=tf.float32,
+                                                initializer=tf.constant_initializer(pssm))
+                            depth = 1
+                            filter_width = pssm.shape[0]
+                            conv_biases = tf.zeros(shape=[depth])
+                            stride = 1
+                            conv = conv1D(self.tf_sequence, usual_conv_kernel, strides=[1, 1, stride, 1])
+                            num_nodes = (self.sequence_width - filter_width) / stride + 1
+                            denominator = 4
+                            for div in range(4, 10):
+                                if num_nodes % div == 0:
+                                    denominator = div
+                                    break
+                            activation = tf.nn.bias_add(conv, conv_biases)
+                            pooled = tf.nn.relu(max_pool_1xn(activation, num_nodes / denominator))
+                            result.append(flatten(pooled))
+                return result
+
+            merged_summary = None
+
+            activations.extend(get_activations_for_tf(self.transcription_factor))
+
+        return activations, merged_summary
+
