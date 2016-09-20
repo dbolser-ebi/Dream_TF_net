@@ -499,12 +499,9 @@ class Evaluator:
         data = None
 
         tot_num_test_instances = reduce(lambda x, y: self.datareader.get_num_instances(y)+x, test_chromosomes, 0)
-        if isinstance(model, ConvNet):
-            y_tot_test = np.zeros((tot_num_test_instances,), dtype=np.float32)
-            y_tot_pred = np.zeros((tot_num_test_instances,), dtype=np.float32)
-        else:
-            y_tot_pred = np.zeros((tot_num_test_instances,), dtype=np.int32)
-            y_tot_test = np.zeros((tot_num_test_instances,), dtype=np.int32)
+        y_tot_test = np.zeros((tot_num_test_instances,), dtype=np.float32)
+        y_tot_pred = np.zeros((tot_num_test_instances,), dtype=np.float32)
+
         t_idx = 0
 
         #run cached test sets
