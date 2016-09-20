@@ -11,7 +11,7 @@ class Data:
 
     def __init__(self, path, transcription_factor, bin_size,
                  dnase_bin_size, chipseq_bin_size, num_dnase_features, ambiguous_as_bound,
-                 num_train_instances=-1, num_train_celltypes=-1, num_test_instances=-1):
+                 num_train_instances=-1, num_train_celltypes=-1, num_test_instances=-1, chromosome='chr10'):
         self.transcription_factor = transcription_factor
         self.path = path
         self.num_train_instances = num_train_instances
@@ -24,10 +24,17 @@ class Data:
         self.train_id = transcription_factor + str(self.num_train_instances)
         self.test_id = transcription_factor + str(self.num_test_instances)
         self.ambiguous_as_bound = ambiguous_as_bound
-        self.run_id = transcription_factor + \
-                 "_ub_" + str(unbound_fraction) + "_ab_" + str(self.ambiguous_as_bound) \
-                 + "_bs_" + str(self.bin_size) + "_dbs_" + str(self.dnase_bin_size) + \
-                 "_cbs_" + str(self.chipseq_bin_size)
+        self.chromosome = chromosome
+        if num_train_instances != -1:
+            self.run_id = transcription_factor + \
+                     "_ub_" + str(unbound_fraction) + "_ab_" + str(self.ambiguous_as_bound) \
+                     + "_bs_" + str(self.bin_size) + "_dbs_" + str(self.dnase_bin_size) + \
+                     "_cbs_" + str(self.chipseq_bin_size)
+        else:
+            self.run_id = transcription_factor + \
+                          "_ub_" + str(unbound_fraction) + "_ab_" + str(self.ambiguous_as_bound) \
+                          + "_bs_" + str(self.bin_size) + "_dbs_" + str(self.dnase_bin_size) + \
+                          "_cbs_" + str(self.chipseq_bin_size) + chromosome
 
         if self.exists():
             self.load_from_disk()
@@ -39,14 +46,15 @@ class Data:
                 self.da_train = self.get_da_train(self.num_train_instances, num_train_celltypes, self.num_dnase_features)
                 self.da_train_val = np.zeros((self.num_train_instances, self.num_dnase_features, 1), dtype=np.float32)
                 self.y_train_val = np.zeros((self.num_train_instances,), dtype=np.int32)
-                self.chipseq_fold_coverage_train = np.zeros((self.num_train_instances, num_train_celltypes), dtype=np.float32)
+                self.chipseq_fold_coverage_train = np.zeros((self.num_train_instances, num_train_celltypes),
+                                                            dtype=np.float32)
             elif num_test_instances != -1:
                 self.X_test = self.get_X(self.num_test_instances, self.bin_size)
                 self.S_test = self.get_S(self.num_test_instances, self.bin_size)
                 self.y_test = self.get_y_test(self.num_test_instances)
                 self.da_test = self.get_da_test(self.num_test_instances, self.num_dnase_features)
                 self.chipseq_fold_coverage_test = np.zeros((self.num_test_instances, num_train_celltypes),
-                                                            dtype=np.float32)
+                                                           dtype=np.float32)
 
     def get_X(self, num_instances, bin_size):
         X = np.zeros((num_instances, bin_size, 4), dtype=np.float32)
@@ -88,12 +96,11 @@ class Data:
                     self.chipseq_fold_coverage_train)
 
         elif self.num_test_instances != -1:
-            np.save(os.path.join(self.path, self.test_id + str(self.bin_size) + 'Xtest.npy'), self.X_test)
-            np.save(os.path.join(self.path, self.test_id + str(self.bin_size) + 'Stest.npy'), self.S_test)
-            np.save(os.path.join(self.path, self.test_id + str(self.dnase_bin_size)
-                                 + str(self.num_dnase_features) + 'datest.npy'), self.da_test)
-            np.save(os.path.join(self.path, self.test_id + str(self.ambiguous_as_bound) + 'ytest.npy'), self.y_test)
-            np.save(os.path.join(self.path, self.test_id + str(self.chipseq_bin_size)
+            np.save(os.path.join(self.path, self.run_id + 'Xtest.npy'), self.X_test)
+            np.save(os.path.join(self.path, self.run_id+ 'Stest.npy'), self.S_test)
+            np.save(os.path.join(self.path, self.run_id + 'datest.npy'), self.da_test)
+            np.save(os.path.join(self.path, self.run_id + 'ytest.npy'), self.y_test)
+            np.save(os.path.join(self.path, self.run_id
                                  + 'chipseq_fold_coverage_test.npy'), self.chipseq_fold_coverage_test)
 
     def load_from_disk(self):
@@ -309,8 +316,9 @@ class Evaluator:
             celltypes = self.datareader.get_celltypes_for_tf(transcription_factor)
             gene_expression_features = self.datareader.get_gene_expression_tpm(celltypes)
 
-            data = Data("ladder", "/data/models", self.bin_size, self.num_dnase_features, self.num_train_instances,
-                        len(celltypes))
+            data = Data("/data/models", transcription_factor, self.bin_size, self.dnase_bin_size,
+                        self.chipseq_bin_size, self.num_dnase_features, self.ambiguous_as_bound,
+            self.num_train_instances, len(celltypes))
 
             for idx, instance in enumerate(self.datareader.generate_cross_celltype(part, transcription_factor,
                                                                                    celltypes,
@@ -323,10 +331,10 @@ class Evaluator:
                                                                                    chipseq_bin_size=self.chipseq_bin_size
                                                                                    )):
                 (_, _), sequence, shape_features, dnase_features, chipseq_fold_coverage, labels = instance
-                data.X_train[idx] = self.get_X_data(model, sequence)
-                data.y_train[idx] = self.get_y_test_data(model, labels)
-                data.S_train[idx] = self.get_S_data(model, shape_features, self.bin_size)
-                data.da_train[idx] = self.get_da_test_data(model, dnase_features)
+                data.X_train[idx] = self.get_X_data(sequence)
+                data.y_train[idx] = self.get_y_test_data(labels)
+                data.S_train[idx] = self.get_S_data(shape_features, self.bin_size)
+                data.da_train[idx] = self.get_da_test_data(dnase_features)
                 data.chipseq_fold_coverage_train[idx] = chipseq_fold_coverage
 
             model.fit(data.X_train, data.y_train, data.S_train, gene_expression_features, data.da_train, data.chipseq_fold_coverage_train)
@@ -360,9 +368,9 @@ class Evaluator:
                         dnase_feature_lines.append(handler.next())
 
                     if idx == 0:
-                        X_test = self.get_X(model, min(test_batch_size, num_test_lines-l_idx), self.bin_size)
-                        S_test = self.get_S(model, min(test_batch_size, num_test_lines-l_idx), self.bin_size)
-                        da_test = self.get_da_test(model, min(test_batch_size, num_test_lines-l_idx), self.num_dnase_features)
+                        X_test = self.get_X(min(test_batch_size, num_test_lines-l_idx), self.bin_size)
+                        S_test = self.get_S(min(test_batch_size, num_test_lines-l_idx), self.bin_size)
+                        da_test = self.get_da_test(min(test_batch_size, num_test_lines-l_idx), self.num_dnase_features)
 
                     tokens = line.split()
                     chromosome = tokens[0]
@@ -398,8 +406,8 @@ class Evaluator:
                         shape_features = self.datareader.get_shape_features(chromosome)
 
                     sequence = hg19[chromosome][start:end]
-                    X_test[idx] = self.get_X_data(model, sequence)
-                    S_test[idx] = self.get_S_data(model, shape_features[start:end], self.bin_size)
+                    X_test[idx] = self.get_X_data(sequence)
+                    S_test[idx] = self.get_S_data(shape_features[start:end], self.bin_size)
                     da_test[idx] = dnase_labels
 
                     idx += 1
@@ -504,13 +512,13 @@ class Evaluator:
             self.num_test_instances = self.datareader.get_num_instances(chromosome)
             data = Data(model_path, transcription_factor, self.bin_size, self.dnase_bin_size,
                         self.chipseq_bin_size, self.num_dnase_features, self.ambiguous_as_bound, num_test_instances=self.num_test_instances,
-                        num_train_celltypes=len(celltypes_train))
+                        num_train_celltypes=len(celltypes_train), chromosome=chromosome)
             if data.exists():
                 print 'Results for test', chromosome
                 print 'num test instances', self.num_test_instances
                 y_pred = model.predict(data.X_test, data.S_test, gene_expression_features, data.da_test)
                 if self.debug:
-                    with open('../log/debug_'+transcription_factor+model.__class__.__name__+chromosome) as fout, \
+                    with open('../log/debug_'+transcription_factor+model.__class__.__name__+chromosome+'.bedgraph') as fout, \
                             gzip.open('../data/annotations/train_regions.blacklistfiltered.bed.gz') as fin:
                         idx = 0
                         difference = np.abs(y_pred-data.y_test)
@@ -550,7 +558,8 @@ class Evaluator:
 
                 data = Data(model_path, transcription_factor, self.bin_size, self.dnase_bin_size, self.chipseq_bin_size,
                             self.num_dnase_features, self.ambiguous_as_bound,
-                            num_test_instances=self.num_test_instances, num_train_celltypes=len(celltypes_train))
+                            num_test_instances=self.num_test_instances, num_train_celltypes=len(celltypes_train),
+                            chromosome=chromosome)
                 idx = 0
 
             elif curr_chr != chromosome and chromosome in test_chromosomes:
@@ -569,7 +578,8 @@ class Evaluator:
                 self.num_test_instances = self.datareader.get_num_instances(chromosome)
                 data = Data(model_path, transcription_factor, self.bin_size, self.dnase_bin_size,
                             self.chipseq_bin_size, self.num_dnase_features, self.ambiguous_as_bound,
-                            num_test_instances=self.num_test_instances, num_train_celltypes=len(celltypes_train))
+                            num_test_instances=self.num_test_instances, num_train_celltypes=len(celltypes_train),
+                            chromosome=chromosome)
                 idx = 0
 
             elif curr_chr != '-1' and curr_chr != chromosome:
