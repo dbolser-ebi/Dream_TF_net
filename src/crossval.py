@@ -515,7 +515,9 @@ class Evaluator:
                 print 'num test instances', self.num_test_instances
                 y_pred = model.predict(data.X_test, data.S_test, gene_expression_features, data.da_test)
                 if self.debug:
-                    with open('../log/debug_'+transcription_factor+model.__class__.__name__+chromosome+'.bedgraph') as fout, \
+                    with open('../data/log/debug_' +
+                              transcription_factor+model.__class__.__name__+chromosome+'.bedgraph', 'w') \
+                            as fout, \
                             gzip.open('../data/annotations/train_regions.blacklistfiltered.bed.gz') as fin:
                         idx = 0
                         difference = np.abs(y_pred-data.y_test)
@@ -710,7 +712,7 @@ if __name__ == '__main__':
                               ambiguous_as_bound=args.ambiguous_bound,
                               show_progress=args.show_progress, num_dnase_features=num_dnase_features,
                               unbound_fraction=unbound_fraction, dnase_bin_size=dnase_bin_size,
-                              chipseq_bin_size=chipseq_bin_size)
+                              chipseq_bin_size=chipseq_bin_size, debug=args.debug)
         for transcription_factor in transcription_factors:
             if args.validate:
                 evaluator.run_cross_cell_benchmark(model, transcription_factor, save_train_set=True,
