@@ -142,7 +142,7 @@ class Data:
 
 class Evaluator:
 
-    def __init__(self, datapath, bin_size=200, ambiguous_as_bound=False, show_progress=True, num_dnase_features=4,
+    def __init__(self, datapath, bin_size=200, ambiguous_as_bound=False, num_dnase_features=4,
                  unbound_fraction=1.0, dnase_bin_size=200, chipseq_bin_size=200, debug=False):
         self.num_dnase_features = num_dnase_features
         self.num_train_instances = 51676736
@@ -153,7 +153,6 @@ class Evaluator:
         self.datareader = DataReader(datapath)
         self.bin_size = bin_size
         self.ambiguous_as_bound = ambiguous_as_bound
-        self.show_progress = show_progress
         self.unbound_fraction = unbound_fraction
         self.chipseq_bin_size = chipseq_bin_size
         self.dnase_bin_size = dnase_bin_size
@@ -599,8 +598,6 @@ class Evaluator:
                 data.S_test[idx] = self.get_S_data(shape_features, self.bin_size)
                 data.da_test[idx] = dnase_features
                 data.chipseq_fold_coverage_test[idx] = chipseq_fold_coverage
-                if self.show_progress:
-                    bar.next()
                 idx += 1
 
         print "Overall test results"
@@ -613,8 +610,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--transcription_factors', '-tfs', help='Comma separated list of transcription factors', required=True)
     parser.add_argument('--model', '-m', help='Choose model [TFC/RENS]', required=True)
-    parser.add_argument('--show_progress', '-sp', help="show progress in progress bar", action='store_true',
-                        required=False)
     parser.add_argument('--save_validset', '-sv', help="save validation set", action='store_true', required=False)
     parser.add_argument('--regression', '-reg', help='Use the chipseq signal strength as targets', action='store_true',
                         required=False)
@@ -709,8 +704,7 @@ if __name__ == '__main__':
     if model is not None:
         transcription_factors = args.transcription_factors.split(',')
         evaluator = Evaluator('../data/', bin_size=bin_size,
-                              ambiguous_as_bound=args.ambiguous_bound,
-                              show_progress=args.show_progress, num_dnase_features=num_dnase_features,
+                              ambiguous_as_bound=args.ambiguous_bound, num_dnase_features=num_dnase_features,
                               unbound_fraction=unbound_fraction, dnase_bin_size=dnase_bin_size,
                               chipseq_bin_size=chipseq_bin_size, debug=args.debug)
         for transcription_factor in transcription_factors:
