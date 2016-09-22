@@ -117,28 +117,13 @@ class DataGenerator:
             celltype_names = list(labels.columns[3:])
 
             for celltype in celltype_names:
-                pdb.set_trace()
-                celltype_labels = np.array(labels.celltype)
+                celltype_labels = np.array(labels[celltype])
                 unbound_indices = np.where(celltype_labels == 'U')
                 y[unbound_indices, tf_lookup[transcription_factor], celltype_lookup[celltype]] = 0
                 ambiguous_indices = np.where(celltype_labels == 'A')
                 y[ambiguous_indices, tf_lookup[transcription_factor], celltype_lookup[celltype]] = 0
-                bound_indices = np.where(celltype_labels == 'C')
+                bound_indices = np.where(celltype_labels == 'B')
                 y[bound_indices, tf_lookup[transcription_factor], celltype_lookup[celltype]] = 1
-            '''
-            with gzip.open(path) as fin:
-                celltype_names = fin.readline().split()[3:]
-                for l_idx, line in enumerate(fin):
-                    tokens = line.split()
-                    bound_states = tokens[3:]
-
-                    for i in range(len(bound_states)):
-                        if bound_states[i] == 'B':
-                            y[l_idx, tf_lookup[transcription_factor], celltype_lookup[celltype_names[i]]] = 1
-                        else:
-                            y[l_idx, tf_lookup[transcription_factor], celltype_lookup[celltype_names[i]]] = 0
-            '''
-            pdb.set_trace()
 
         np.save(os.path.join(self.save_dir, 'y.npy'), y)
 
@@ -165,6 +150,7 @@ class DataGenerator:
         return lookup
 
     def get_sequece_from_ids(self, ids, segment):
+        ids.sort()
         return
 
 

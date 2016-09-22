@@ -202,21 +202,16 @@ def preprocess_chipseq(num_jobs, bin_size):
 
 
 def parallel_normalize_dnaseq(ifpath, ofpath):
-    print ifpath
-    dnase_features = pd.read_csv(ifpath, delimiter=" ", dtype=np.float16)
+    dnase_features = pd.read_csv(ifpath, delimiter=" ", dtype=np.float32)
     # downsample
-    dnase_array = np.array(dnase_features, dtype=np.float16)
-    dnase_downsampled = []
-    for row in dnase_array:
-        dnase_downsampled.append(np.hstack((row[0:3], [np.mean(row[3+6*i:9+6*i]) for i in range(10)])))
-    dnase_downsampled = np.array(dnase_downsampled, dtype=np.float16)
+    dnase_features = np.array(dnase_features, dtype=np.float32)
+    dnase_features = np.hstack((dnase_features[:, :3], dnase_features[:, 3::6]))
 
-    dnase_downsampled = pd.DataFrame(dnase_downsampled)
-    dnase_downsampled = (dnase_downsampled - dnase_downsampled.mean()) / dnase_downsampled.std()
-    dnase_norm = np.array(dnase_downsampled, dtype=np.float16)
-    dnase_norm[np.isnan(dnase_norm) | np.isinf(dnase_norm)] = 0
+    dnase_norm = StandardScaler().fit_transform(dnase_features)
+    dnase_norm[np.isnan(dnase_norm)] = 0
+    dnase_norm[np.isinf(dnase_norm)] = 0
 
-    np.save(ofpath+'.npy', dnase_norm)
+    np.save(ofpath+'.npy', dnase_norm.astype(np.float16))
 
 
 def normalize_dnaseq(num_jobs):
@@ -238,6 +233,7 @@ def normalize_dnaseq(num_jobs):
     for i in range(0, len(processes), num_jobs):
         map(lambda x: x.start(), processes[i:i + num_jobs])
         map(lambda x: x.join(), processes[i:i + num_jobs])
+
 
 if __name__ == '__main__':
 
