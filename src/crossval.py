@@ -439,6 +439,8 @@ class Evaluator:
         self.num_train_instances = int(self.datareader.get_num_bound_lines(transcription_factor,
                                                                            self.ambiguous_as_bound)*(1+unbound_fraction))
 
+        #self.num_train_instances = int(51676736*0.1)
+
         model.set_transcription_factor(transcription_factor)
 
         celltypes_train = celltypes[:-1]
@@ -515,11 +517,13 @@ class Evaluator:
                 y_pred = model.predict(data.X_test, data.S_test, gene_expression_features, data.da_test)
                 if self.debug:
                     with open('../data/log/debug_' +
-                              transcription_factor+model.__class__.__name__+chromosome+'.bedgraph', 'w') \
+                              transcription_factor+model.__class__.__name__+chromosome + "_bs_" +
+                                      str(self.bin_size)+"_dbs"+str(self.dnase_bin_size) +
+                                      "_u_" + str(self.unbound_fraction)+'.bedgraph', 'w') \
                             as fout, \
                             gzip.open('../data/annotations/train_regions.blacklistfiltered.bed.gz') as fin:
                         idx = 0
-                        difference = np.abs(y_pred-data.y_test)
+                        difference = y_pred-data.y_test
                         for line in fin:
                             tokens = line.split()
                             chr_ = tokens[0]

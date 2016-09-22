@@ -2,7 +2,11 @@ from datareader import *
 from multiprocessing import Process
 import argparse
 from subprocess import Popen, PIPE
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+import pandas as pd
+import time
+import re
+import pdb
 
 
 def print_num_instances_for_each_chromosome():
@@ -196,11 +200,51 @@ def preprocess_chipseq(num_jobs, bin_size):
         map(lambda x: x.start(), processes[i:i + num_jobs])
         map(lambda x: x.join(), processes[i:i + num_jobs])
 
+
+def parallel_normalize_dnaseq(ifpath, ofpath):
+    print ifpath
+    dnase_features = pd.read_csv(ifpath, delimiter=" ", dtype=np.float16)
+    # downsample
+    dnase_array = np.array(dnase_features, dtype=np.float16)
+    dnase_downsampled = []
+    for row in dnase_array:
+        dnase_downsampled.append(np.hstack((row[0:3], [np.mean(row[3+6*i:9+6*i]) for i in range(10)])))
+    dnase_downsampled = np.array(dnase_downsampled, dtype=np.float16)
+
+    dnase_downsampled = pd.DataFrame(dnase_downsampled)
+    dnase_downsampled = (dnase_downsampled - dnase_downsampled.mean()) / dnase_downsampled.std()
+    dnase_norm = np.array(dnase_downsampled, dtype=np.float16)
+    dnase_norm[np.isnan(dnase_norm) | np.isinf(dnase_norm)] = 0
+
+    np.save(ofpath+'.npy', dnase_norm)
+
+
+def normalize_dnaseq(num_jobs):
+    in_dir_path = '../data/preprocess/DNASE_FEATURES/'
+    out_dir_path = '../data/preprocess/DNASE_FEATURES_NORM/'
+    if not os.path.exists(out_dir_path):
+        os.makedirs(out_dir_path)
+    processes = []
+    for fname in os.listdir(in_dir_path):
+        if "600" in fname:
+            ifpath = os.path.join(in_dir_path, fname)
+            ofpath = os.path.join(out_dir_path, fname)
+
+            processes.append(Process(
+                target=parallel_normalize_dnaseq,
+                args=(ifpath, ofpath,)
+            ))
+
+    for i in range(0, len(processes), num_jobs):
+        map(lambda x: x.start(), processes[i:i + num_jobs])
+        map(lambda x: x.join(), processes[i:i + num_jobs])
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--dnase', action='store_true', required=False)
     parser.add_argument('--chipseq', action='store_true', required=False)
+    parser.add_argument('--norm_dnase', action='store_true', required=False)
     parser.add_argument('--num_jobs', '-nj', help="number of cores to use", required=True)
     parser.add_argument('--bin_size', '-bs', help="bin size", required=False)
     args = parser.parse_args()
@@ -213,4 +257,6 @@ if __name__ == '__main__':
         preprocess_dnase(num_jobs, bin_size)
     if args.chipseq:
         preprocess_chipseq(num_jobs, bin_size)
+    if args.norm_dnase:
+        normalize_dnaseq(num_jobs)
 
