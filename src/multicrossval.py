@@ -58,7 +58,7 @@ class Evaluator:
     def compute_bound(self):
         datagen = DataGenerator()
         bound_positions = datagen.get_bound_positions()
-        print len(list(set(bound_positions)))
+        print len(bound_positions)
 
 if __name__ == '__main__':
     evaluator = Evaluator()

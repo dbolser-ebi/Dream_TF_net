@@ -210,7 +210,7 @@ class DataGenerator:
                         continue
 
                     bound_positions.extend(lookup[(trans_f, celltype)][0].tolist())
-            bound_positions = np.array(bound_positions, dtype=np.int32)
+            bound_positions = np.array(set(bound_positions), dtype=np.int32)
             np.save(save_path, bound_positions)
         return bound_positions
 
