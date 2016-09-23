@@ -6,6 +6,7 @@ import argparse
 import gzip
 import pdb
 import pandas as pd
+from random import shuffle
 
 
 class DataGenerator:
@@ -19,25 +20,45 @@ class DataGenerator:
         self.train_length = 51676736
         self.ladder_length = 8843011
         self.test_length = 60519747
-        self.chunck_size = 1000000
+        self.chunk_size = 1000000
         self.num_channels = 4
-        self.num_tfs = len(self.get_tfs())
+        self.num_trans_fs = len(self.get_trans_fs())
         self.num_celltypes = len(self.get_celltypes())
         self.save_dir = os.path.join(self.datapath, 'preprocess/features')
+        self.bin_size = 600
+
+    def get_celltypes_for_trans_f(self, transcription_factor):
+        '''
+        Returns the list of celltypes for that particular transcription factor
+        :param datapath: Path to the label directory
+        :param transcription_factor: TF to Crossval
+        :return: celltypes, a list of celltype for that TF
+        '''
+        files = [f for f in os.listdir(os.path.join(self.datapath, self.label_path))]
+        celltypes = []
+        for f_name in files:
+            if transcription_factor in f_name:
+                fpath = os.path.join(self.datapath, os.path.join(self.label_path, f_name))
+                with gzip.open(fpath) as fin:
+                    header_tokens = fin.readline().split()
+                    celltypes = header_tokens[3:]
+                break
+        celltypes = list(set(celltypes))
+        return celltypes
 
     ## UTILITIES
-    def get_tfs(self):
+    def get_trans_fs(self):
         '''
         Returns the list of all TFs
-        :return: list of tfs
+        :return: list of trans_fs
         '''
-        tfs = []
+        trans_fs = []
         files = [f for f in os.listdir(self.label_path)]
-        tfs = []
+        trans_fs = []
         for f in files:
-            tfs.append(f.split('.')[0])
-        tfs = list(set(tfs))
-        return tfs
+            trans_fs.append(f.split('.')[0])
+        trans_fs = list(set(trans_fs))
+        return trans_fs
 
     def get_celltypes(self):
         celltypes = []
@@ -61,10 +82,10 @@ class DataGenerator:
             return encoding
 
     # FEATURE GENERATION
-    def generate_sequence(self, segment, bin_size):
+    def generate_sequence(self, segment):
         if segment not in ['train', 'ladder', 'test']:
             raise Exception('Please specify the segment')
-        bin_correction = max(0, (bin_size - 200) / 2)
+        bin_correction = max(0, (self.bin_size - 200) / 2)
 
         if not os.path.exists(self.save_dir):
             os.mkdir(self.save_dir)
@@ -72,46 +93,46 @@ class DataGenerator:
         l_idx = 0
         with gzip.open('../data/annotations/%s_regions.blacklistfiltered.bed.gz' % segment) as fin:
             for line in fin:
-                if l_idx % self.chunck_size == 0:
+                if l_idx % self.chunk_size == 0:
                     if l_idx != 0:
                         # save X
                         save_path = os.path.join(self.save_dir,
                                                  'segment_' + segment +
-                                                 '_bin_size_' + str(bin_size) +
+                                                 '_bin_size_' + str(self.bin_size) +
                                                  '_chunk_id_' + str(l_idx-X.shape[0]) + '.npy')
                         np.save(save_path, X)
                         print "Chunk", l_idx, "saved"
 
                     if segment == 'train':
-                        length = min(self.chunck_size, self.train_length-l_idx)
+                        length = min(self.chunk_size, self.train_length-l_idx)
                     if segment == 'ladder':
-                        length = min(self.chunck_size, self.ladder_length-l_idx)
+                        length = min(self.chunk_size, self.ladder_length-l_idx)
                     if segment == 'test':
-                        length = min(self.chunck_size, self.test_length-l_idx)
-                    X = np.zeros((length, bin_size, self.num_channels), dtype=np.float16)
+                        length = min(self.chunk_size, self.test_length-l_idx)
+                    X = np.zeros((length, self.bin_size, self.num_channels), dtype=np.float16)
 
                 tokens = line.split()
                 chromosome = tokens[0]
                 start = int(tokens[1])
                 end = int(tokens[2])
                 sequence = self.hg19[chromosome][start-bin_correction:start + self.sequence_length + bin_correction]
-                sequence_one_hot = self.sequence_to_one_hot(sequence)
-                X[l_idx % self.chunck_size] = sequence_one_hot
+                sequence_one_hot = self.sequence_to_one_hot(np.array(list(sequence)))
+                X[l_idx % self.chunk_size, :, :] = sequence_one_hot
                 l_idx += 1
         # save remainder X
         save_path = os.path.join(self.save_dir,
                                  'segment_' + segment +
-                                 '_bin_size_' + str(bin_size) +
+                                 '_bin_size_' + str(self.bin_size) +
                                  '_chunk_id_' + str(l_idx-X.shape[0]) + '.npy')
         if not os.path.exists(save_path):
             np.save(save_path, X)
 
     def generate_y(self):
-        tf_lookup = self.get_tf_lookup()
+        trans_f_lookup = self.get_trans_f_lookup()
         celltype_lookup = self.get_celltype_lookup()
-        y = -1 * np.ones((self.train_length, self.num_tfs, self.num_celltypes), dtype=np.float16)
+        y = -1 * np.ones((self.train_length, self.num_trans_fs, self.num_celltypes), dtype=np.float16)
 
-        for transcription_factor in self.get_tfs():
+        for transcription_factor in self.get_trans_fs():
             path = os.path.join(self.label_path, '%s.train.labels.tsv.gz' % transcription_factor)
             labels = pd.read_csv(path, delimiter='\t')
             celltype_names = list(labels.columns[3:])
@@ -119,28 +140,34 @@ class DataGenerator:
             for celltype in celltype_names:
                 celltype_labels = np.array(labels[celltype])
                 unbound_indices = np.where(celltype_labels == 'U')
-                y[unbound_indices, tf_lookup[transcription_factor], celltype_lookup[celltype]] = 0
+                y[unbound_indices, trans_f_lookup[transcription_factor], celltype_lookup[celltype]] = 0
                 ambiguous_indices = np.where(celltype_labels == 'A')
-                y[ambiguous_indices, tf_lookup[transcription_factor], celltype_lookup[celltype]] = 0
+                y[ambiguous_indices, trans_f_lookup[transcription_factor], celltype_lookup[celltype]] = 0
                 bound_indices = np.where(celltype_labels == 'B')
-                y[bound_indices, tf_lookup[transcription_factor], celltype_lookup[celltype]] = 1
+                y[bound_indices, trans_f_lookup[transcription_factor], celltype_lookup[celltype]] = 1
 
-        np.save(os.path.join(self.save_dir, 'y.npy'), y)
+        for celltype in self.get_celltypes():
+            np.save(os.path.join(self.save_dir, 'y_%s.npy' % celltype),
+                    np.reshape(y[:, :, celltype_lookup[celltype]], (self.train_length, self.num_trans_fs))
+                    )
 
     def get_bound_lookup(self):
         lookup = {}
-        tf_lookup = self.get_tf_lookup()
-        celltype_lookup = self.get_celltype_lookup()
-        y = np.load(os.path.join(self.save_dir, 'y.npy'))
-        for tf in self.get_tfs():
-            for celltype in self.get_celltypes():
-                lookup[(tf, celltype)] = np.where(y[:, tf_lookup[tf], celltype_lookup[celltype]])
+        trans_f_lookup = self.get_trans_f_lookup()
+
+        for celltype in self.get_celltypes():
+            for trans_f in self.get_trans_fs():
+                print celltype, trans_f, self.get_celltypes_for_trans_f(trans_f)
+                if celltype not in self.get_celltypes_for_trans_f(trans_f):
+                    continue
+                y = np.load(os.path.join(self.save_dir, 'y_%s.npy' % celltype))
+                lookup[(trans_f, celltype)] = np.where(y[:, trans_f_lookup[trans_f]] == 1)
         return lookup
 
-    def get_tf_lookup(self):
+    def get_trans_f_lookup(self):
         lookup = {}
-        for idx, tf in enumerate(self.get_tfs()):
-            lookup[tf] = idx
+        for idx, trans_f in enumerate(self.get_trans_fs()):
+            lookup[trans_f] = idx
         return lookup
 
     def get_celltype_lookup(self):
@@ -150,8 +177,42 @@ class DataGenerator:
         return lookup
 
     def get_sequece_from_ids(self, ids, segment):
+        X = np.zeros((len(ids), self.bin_size, self.num_channels), dtype=np.float16)
         ids.sort()
-        return
+        chunk_limit = self.chunk_size
+        chunk = np.load(os.path.join(self.save_dir,
+                                     'segment_%s_bin_size_%d_chunk_id_%d.npy')
+                        % (segment, self.bin_size, 0))
+        for id_idx, id in enumerate(ids):
+            while id >= chunk_limit-self.chunk_size:
+                chunk_limit += self.chunk_size
+            if id >= chunk_limit:
+                chunk = np.load(os.path.join(self.save_dir,
+                                             'segment_%s_bin_size_%d_chunk_id_%d.npy')
+                                % (segment, self.bin_size, chunk_limit))
+                chunk_limit += self.chunk_size
+
+            chunk_start = chunk_limit-self.chunk_size
+            X[id_idx] = chunk[id-chunk_start]
+        return X
+
+    def get_bound_positions(self):
+        save_path = os.path.join(self.save_dir, 'bound_positions.npy')
+        if os.path.exists(save_path):
+            bound_positions = np.load(save_path)
+            return bound_positions
+        else:
+            lookup = self.get_bound_lookup()
+            bound_positions = []
+            for trans_f in self.get_trans_fs():
+                for celltype in self.get_celltypes():
+                    if celltype not in self.get_celltypes_for_trans_f(trans_f):
+                        continue
+
+                    bound_positions.extend(lookup[(trans_f, celltype)][0].tolist())
+            bound_positions = np.array(bound_positions, dtype=np.int32)
+            np.save(save_path, bound_positions)
+        return bound_positions
 
 
 if __name__ == '__main__':
@@ -159,15 +220,13 @@ if __name__ == '__main__':
     parser.add_argument('--gen_sequence', action='store_true', required=False)
     parser.add_argument('--gen_y', action='store_true', required=False)
     parser.add_argument('--segment', required=True)
-    parser.add_argument('--bin_size', required=True)
 
     args = parser.parse_args()
-    bin_size = int(200 if args.bin_size is None else args.bin_size)
-    bin_size -= bin_size % 2
-
     datagen = DataGenerator()
 
     if args.gen_sequence:
-        datagen.generate_sequence(args.segment, bin_size)
+        datagen.generate_sequence(args.segment)
     if args.gen_y:
         datagen.generate_y()
+
+

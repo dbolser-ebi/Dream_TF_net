@@ -202,10 +202,10 @@ def preprocess_chipseq(num_jobs, bin_size):
 
 
 def parallel_normalize_dnaseq(ifpath, ofpath):
-    dnase_features = pd.read_csv(ifpath, delimiter=" ", dtype=np.float32)
+    dnase_features = pd.read_csv(ifpath, delimiter=" ", dtype=np.float32, header=None)
     # downsample
     dnase_features = np.array(dnase_features, dtype=np.float32)
-    dnase_features = np.hstack((dnase_features[:, :3], dnase_features[:, 3::6]))
+    #dnase_features = np.hstack((dnase_features[:, :3], dnase_features[:, 3::6]))
 
     dnase_norm = StandardScaler().fit_transform(dnase_features)
     dnase_norm[np.isnan(dnase_norm)] = 0
