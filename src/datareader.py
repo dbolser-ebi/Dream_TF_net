@@ -624,23 +624,25 @@ class DataReader:
                 if celltype in celltypes:
                     idxs.append(i)
 
+
             dnase_feature_handlers = []
             for celltype in celltypes:
                 f = gzip.open(os.path.join(self.datapath, 'preprocess/DNASE_FEATURES/%s_%s_%d.gz' % (celltype, part, dnase_bin_size)))
                 dnase_feature_handlers.append(f)
 
-            chipseq_feature_handlers = []
-            for celltype in celltypes_train:
-                f = gzip.open(os.path.join(self.datapath, 'preprocess/CHIPSEQ_FEATURES/%s_%s_%d.gz' % (celltype, transcription_factor, chipseq_bin_size)))
-                chipseq_feature_handlers.append(f)
+            '''
+            dnase_norm_files = []
+            for celltype in celltypes:
+                dnase_norm = np.load('../data/preprocess/DNASE_FEATURES_NORM/%s_%s_600.gz.npy' % (celltype, part))
+                dnase_norm_files.append(dnase_norm)
+            '''
 
             for l_idx, line in enumerate(fin):
+
                 dnase_feature_lines = []
                 for handler in dnase_feature_handlers:
                     dnase_feature_lines.append(handler.next())
-                chipseq_feature_lines = []
-                for handler in chipseq_feature_handlers:
-                    chipseq_feature_lines.append(handler.next())
+
 
                 if len(position_tree) == 0 or l_idx in position_tree:
                     tokens = line.split()
@@ -672,6 +674,7 @@ class DataReader:
                         tokens = map(float, dnase_feature_lines[c_idx].split())[:num_dnase_features-1]
                         dnase_fold_coverage[0, c_idx] = dnase_labels[0, c_idx]
                         dnase_fold_coverage[1:, c_idx] = tokens
+                        #dnase_fold_coverage[1:, c_idx] = dnase_norm_files[c_idx][l_idx]
 
                     if chromosome != curr_chromosome:
                         curr_chromosome = chromosome
@@ -681,20 +684,14 @@ class DataReader:
                         if bound_states[idx] == 'B' or (ambiguous_as_bound and bound_states[idx] == 'A'):
                                 labels[:, i] = 1
 
-                    # chipseq fold coverage
-                    chipseq_fold_coverage = np.zeros((1, len(celltypes_train)), dtype=np.float32)
-                    for i, idx in enumerate(celltypes_train):
-                        chipseq_fold_coverage[:, i] = chipseq_feature_lines[i]
-
                     yield (chromosome, start), sequence, \
                           shape_features[start-bin_correction:start+self.sequence_length+bin_correction], \
-                        dnase_fold_coverage, chipseq_fold_coverage, labels
+                        dnase_fold_coverage, None, labels
 
             for handler in dnase_feature_handlers:
                 handler.close()
 
-            for handler in chipseq_feature_handlers:
-                handler.close()
+
 
 if __name__ == '__main__':
     datareader = DataReader('../data/')

@@ -334,9 +334,8 @@ class Evaluator:
                 data.y_train[idx] = self.get_y_test_data(labels)
                 data.S_train[idx] = self.get_S_data(shape_features, self.bin_size)
                 data.da_train[idx] = self.get_da_test_data(dnase_features)
-                data.chipseq_fold_coverage_train[idx] = chipseq_fold_coverage
 
-            model.fit(data.X_train, data.y_train, data.S_train, gene_expression_features, data.da_train, data.chipseq_fold_coverage_train)
+            model.fit(data.X_train, data.y_train, data.S_train, gene_expression_features, data.da_train)
 
             del data
 
@@ -472,14 +471,13 @@ class Evaluator:
                 data.da_train_val[idx, :, :] = np.reshape(dnase_features[:, -1], (self.num_dnase_features, 1))
                 data.y_train[idx] = self.get_y_train_data(labels)
                 data.y_train_val[idx] = labels.flatten()[-1]
-                data.chipseq_fold_coverage_train = chipseq_fold_coverage
 
         if save_train_set:
             data.save_to_disk()
 
         gene_expression_features = self.datareader.get_gene_expression_tpm(celltypes_train)
         model.fit(data.X_train, data.y_train, data.S_train,
-                  gene_expression_features, data.da_train, data.chipseq_fold_coverage_train)
+                  gene_expression_features, data.da_train)
 
         gene_expression_features = self.datareader.get_gene_expression_tpm(celltypes_test)
         predictions = model.predict(data.X_train, data.S_train, gene_expression_features, data.da_train_val)
@@ -601,7 +599,6 @@ class Evaluator:
                 data.X_test[idx] = self.get_X_data(sequence)
                 data.S_test[idx] = self.get_S_data(shape_features, self.bin_size)
                 data.da_test[idx] = dnase_features
-                data.chipseq_fold_coverage_test[idx] = chipseq_fold_coverage
                 idx += 1
 
         print "Overall test results"

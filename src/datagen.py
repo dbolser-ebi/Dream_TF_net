@@ -7,6 +7,7 @@ import gzip
 import pdb
 import pandas as pd
 from random import shuffle
+import random
 
 
 class DataGenerator:
@@ -26,6 +27,8 @@ class DataGenerator:
         self.num_celltypes = len(self.get_celltypes())
         self.save_dir = os.path.join(self.datapath, 'preprocess/features')
         self.bin_size = 600
+        if not os.path.exists(self.save_dir):
+            os.mkdir(self.save_dir)
 
     def get_celltypes_for_trans_f(self, transcription_factor):
         '''
@@ -86,9 +89,6 @@ class DataGenerator:
         if segment not in ['train', 'ladder', 'test']:
             raise Exception('Please specify the segment')
         bin_correction = max(0, (self.bin_size - 200) / 2)
-
-        if not os.path.exists(self.save_dir):
-            os.mkdir(self.save_dir)
 
         l_idx = 0
         with gzip.open('../data/annotations/%s_regions.blacklistfiltered.bed.gz' % segment) as fin:
@@ -164,6 +164,35 @@ class DataGenerator:
                 lookup[(trans_f, celltype)] = np.where(y[:, trans_f_lookup[trans_f]] == 1)
         return lookup
 
+    def get_bound_for_celltype(self, celltype):
+        save_path = os.path.join(self.save_dir, 'bound_positions_%s.npy' % celltype)
+        if os.path.exists(save_path):
+            positions = np.load(save_path)
+        else:
+            print "Getting bound locations for celltype", celltype
+            y = np.load(os.path.join(self.save_dir, 'y_%s.npy' % celltype))
+            y = np.max(y, axis=1)
+            positions = np.where(y == 1)[0]
+            np.save(save_path, positions)
+        return positions
+
+    def get_bound_for_trans_f(self, trans_f):
+        trans_f_lookup = self.get_trans_f_lookup()
+        save_path = os.path.join(self.save_dir, 'bound_positions_%s.npy' % trans_f)
+        if os.path.exists(save_path):
+            positions = np.load(save_path)
+        else:
+            positions = []
+            print "Getting bound locations for transcription factor", trans_f
+            for celltype in self.get_celltypes_for_trans_f(trans_f):
+                y = np.load(os.path.join(self.save_dir, 'y_%s.npy' % celltype))
+                bound_locations = list(np.where(y[:, trans_f_lookup[trans_f]] == 1)[0])
+                positions.extend(bound_locations)
+            positions = list(set(positions))
+            np.save(save_path, np.array(positions, dtype=np.int32))
+
+        return positions
+
     def get_trans_f_lookup(self):
         lookup = {}
         for idx, trans_f in enumerate(self.get_trans_fs()):
@@ -177,45 +206,47 @@ class DataGenerator:
         return lookup
 
     def get_sequece_from_ids(self, ids, segment):
-        X = np.zeros((len(ids), self.bin_size, self.num_channels), dtype=np.float16)
-        ids.sort()
-        chunk_limit = self.chunk_size
-        chunk = np.load(os.path.join(self.save_dir,
-                                     'segment_%s_bin_size_%d_chunk_id_%d.npy')
-                        % (segment, self.bin_size, 0))
-        for id_idx, id in enumerate(ids):
-            while id >= chunk_limit-self.chunk_size:
-                chunk_limit += self.chunk_size
-            if id >= chunk_limit:
-                chunk = np.load(os.path.join(self.save_dir,
-                                             'segment_%s_bin_size_%d_chunk_id_%d.npy')
-                                % (segment, self.bin_size, chunk_limit))
-                chunk_limit += self.chunk_size
+        id_to_position = {}
+        for i, id in enumerate(ids):
+            id_to_position[id] = i
 
-            chunk_start = chunk_limit-self.chunk_size
-            X[id_idx] = chunk[id-chunk_start]
+        X = np.zeros((len(ids), self.bin_size, self.num_channels), dtype=np.float16)
+        chunk_lookup = {}
+        for id in ids:
+            chunk_id = (id/self.chunk_size)*self.chunk_size
+            if chunk_id not in chunk_lookup:
+                chunk_lookup[chunk_id] = []
+            chunk_lookup[chunk_id].append(id)
+        for chunk_id in chunk_lookup.keys():
+            chunk = np.load(os.path.join(self.save_dir,
+                                             'segment_%s_bin_size_%d_chunk_id_%d.npy')
+                                % (segment, self.bin_size, chunk_id))
+            ids = chunk_lookup[chunk_id]
+            x_idxs = map(lambda x: id_to_position[x], ids)
+            ids_corrected = map(lambda x: x-chunk_id, ids)
+            X[x_idxs] = chunk[ids_corrected]
+
         return X
 
     def get_bound_positions(self):
         save_path = os.path.join(self.save_dir, 'bound_positions.npy')
         if os.path.exists(save_path):
             bound_positions = np.load(save_path)
-            return bound_positions
         else:
-            lookup = self.get_bound_lookup()
             bound_positions = []
-            for trans_f in self.get_trans_fs():
-                for celltype in self.get_celltypes():
-                    if celltype not in self.get_celltypes_for_trans_f(trans_f):
-                        continue
-
-                    bound_positions.extend(lookup[(trans_f, celltype)][0].tolist())
+            print "Getting bound locations"
+            for celltype in self.get_celltypes():
+                y = np.load(os.path.join(self.save_dir, 'y_%s.npy' % celltype))
+                y = np.max(y, axis=1)
+                locations = list(np.where(y == 1)[0])
+                bound_positions.extend(locations)
             bound_positions = np.array(list(set(bound_positions)), dtype=np.int32)
             np.save(save_path, bound_positions)
         return bound_positions
 
 
 if __name__ == '__main__':
+    '''
     parser = argparse.ArgumentParser()
     parser.add_argument('--gen_sequence', action='store_true', required=False)
     parser.add_argument('--gen_y', action='store_true', required=False)
@@ -228,5 +259,11 @@ if __name__ == '__main__':
         datagen.generate_sequence(args.segment)
     if args.gen_y:
         datagen.generate_y()
+    '''
+
+    datagen = DataGenerator()
+    datagen.get_sequece_from_ids(random.sample(xrange(51676736), 100), 'train')
+
+
 
 
