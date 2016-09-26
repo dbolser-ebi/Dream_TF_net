@@ -149,6 +149,7 @@ class MultiConvNet:
 
             with tf.variable_scope('R_MOTIF') as scope:
                 with tf.variable_scope('conv15_15') as convscope:
+                    '''
                     depth = 30
                     width = 15
                     rmotif_conv_kernel = weight_variable(shape=[self.height, width, self.num_channels, depth])
@@ -156,6 +157,9 @@ class MultiConvNet:
                     conv_biases = weight_variable(shape=[depth])
                     conv = conv1D(self.tf_sequence, rmotif_conv_kernel)
                     activation = tf.nn.bias_add(conv, conv_biases)
+                    '''
+                    kernel_width = 15
+                    activation = convolution2d(self.tf_sequence, 30, [self.height, kernel_width])
 
                 with tf.variable_scope('pool35') as poolscope:
                     pool_width = 35
