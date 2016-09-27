@@ -7,9 +7,9 @@ import argparse
 class Evaluator:
     def __init__(self, mode):
         self.datagen = DataGenerator()
-        self.model = MultiConvNet('../log', batch_size=512, num_epochs=5, sequence_width=600, num_outputs=self.datagen.num_trans_fs,
+        self.model = MultiConvNet('../log', batch_size=512, num_epochs=10, sequence_width=600, num_outputs=self.datagen.num_trans_fs,
                              eval_size=.2, early_stopping=10, num_dnase_features=13, dropout_rate=.25,
-                             config=7, verbose=True, name='multiconvnet_'+mode, segment='train', learning_rate=0.001)
+                             config=7, verbose=True, name='multiconvnet_'+mode, segment='train', learning_rate=0.01)
         self.mode = mode
 
     def print_results_tf(self, trans_f, y_test, y_pred):
@@ -126,10 +126,10 @@ class Evaluator:
             for trans_f in self.datagen.get_trans_fs():
                 if celltype not in self.datagen.get_celltypes_for_trans_f(trans_f):
                     continue
-                try:
-                    self.print_results_tf(trans_f, y_test[:2702470], y_pred)
-                except KeyboardInterrupt:
-                    pass
+                if trans_f != 'CTCF':
+                    continue
+                self.print_results_tf(trans_f, y_test[:2702470], y_pred)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

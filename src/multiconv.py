@@ -82,9 +82,11 @@ def calc_entropies(logits, labels, tf_index):
     entropies = tf.nn.sigmoid_cross_entropy_with_logits(logits_known, labels_known)
     means = tf.reduce_mean(entropies)
     '''
-    logits = logits[:, tf_index]
+    reshaped_logits = logits[:, tf_index]
+    reshaped_labels = labels[:, tf_index]
     predictions = tf.nn.sigmoid(logits)
-    return logits, labels, predictions
+    entropies = tf.nn.sigmoid_cross_entropy_with_logits(reshaped_logits, reshaped_labels)
+    return reshaped_logits, reshaped_labels, logits, labels, predictions, entropies
 
 
 def calc_regression_loss(prediction, actual):
@@ -149,17 +151,9 @@ class MultiConvNet:
 
             with tf.variable_scope('R_MOTIF') as scope:
                 with tf.variable_scope('conv15_15') as convscope:
-                    '''
-                    depth = 30
-                    width = 15
-                    rmotif_conv_kernel = weight_variable(shape=[self.height, width, self.num_channels, depth])
-
-                    conv_biases = weight_variable(shape=[depth])
-                    conv = conv1D(self.tf_sequence, rmotif_conv_kernel)
-                    activation = tf.nn.bias_add(conv, conv_biases)
-                    '''
                     kernel_width = 15
-                    activation = convolution2d(self.tf_sequence, 30, [self.height, kernel_width])
+                    num_filters = 30
+                    activation = convolution2d(self.tf_sequence, num_filters, [self.height, kernel_width])
 
                 with tf.variable_scope('pool35') as poolscope:
                     pool_width = 35
@@ -179,7 +173,7 @@ class MultiConvNet:
                         merged = tf.concat(1, [dnase_features])
 
                 with tf.variable_scope('fc') as fcscope:
-                    activation = fully_connected(merged, 1000)
+                    activation = fully_connected(merged, 100)
                     drop = tf.nn.dropout(activation, self.keep_prob)
 
                 with tf.variable_scope('output') as outscope:
@@ -206,7 +200,7 @@ class MultiConvNet:
                     print
                     print "EPOCH\tTRAIN LOSS\tVALID LOSS\tVALID ACCURACY\tTIME"
 
-                ids = range(1000000)
+                ids = self.datagen.get_bound_positions()
                 X = self.datagen.get_sequece_from_ids(ids, self.segment)
                 num_examples = X.shape[0]
 
@@ -294,42 +288,45 @@ class MultiConvNet:
                     print
                     print "EPOCH\tTRAIN LOSS\tVALID LOSS\tVALID ACCURACY\tTIME"
 
+
                 #ids = list(self.datagen.get_bound_for_trans_f('CTCF'))
                 #ids.extend(random.sample(xrange(51676736), len(ids)))
-                ids = range(1000000)
+                #ids = np.array(ids)
+                #ids = ids[ids<1000000]
+                ids = range(4000000)
                 X = self.datagen.get_sequece_from_ids(ids, self.segment)
-                num_examples = X.shape[0]
+
                 trans_f_lookup = self.datagen.get_trans_f_lookup()
 
                 # Training
                 for epoch in xrange(1, self.num_epochs+1):
+                    #ids = range((epoch-1)*1000000, epoch*1000000)
+                    #X = self.datagen.get_sequece_from_ids(ids, self.segment)
+                    num_examples = X.shape[0]
                     train_losses = []
                     start_time = time.time()
-                    comb_counter = 0
 
-                    for celltype in celltypes:
+                    for trans_f in self.datagen.get_trans_fs():
+                        if trans_f != 'CTCF':
+                            continue
+                        trans_f_idx = trans_f_lookup[trans_f]
 
-                        print "Loading data for", len(ids), "examples"
-                        da = np.load('../data/preprocess/DNASE_FEATURES_NORM/%s_%s_600.gz.npy'
-                                     % (celltype, self.segment))[ids]
-                        y = np.load('../data/preprocess/features/y_%s.npy' % celltype)[ids]
-                        print 'Data for celltype', celltype, 'loaded.'
-
-                        shuffle_idxs = np.arange(X.shape[0])
-                        np.random.shuffle(shuffle_idxs)
-                        X = X[shuffle_idxs]
-                        y = y[shuffle_idxs]
-                        da = da[shuffle_idxs]
-
-                        for trans_f in self.datagen.get_trans_fs():
-                            if trans_f != 'CTCF':
-                                continue
+                        for celltype in celltypes:
                             if celltype not in self.datagen.get_celltypes_for_trans_f(trans_f):
                                 continue
-                            comb_counter += 1
-                            print "Training on transcription factor", trans_f, '/', comb_counter
+                            print "Loading data for", len(ids), "examples"
+                            da = np.load('../data/preprocess/DNASE_FEATURES_NORM/%s_%s_600.gz.npy'
+                                         % (celltype, self.segment))[ids]
+                            y = np.load('../data/preprocess/features/y_%s.npy' % celltype)[ids]
+                            print 'Data for celltype', celltype, 'loaded.'
 
-                            trans_f_idx = trans_f_lookup[trans_f]
+                            shuffle_idxs = np.arange(X.shape[0])
+                            np.random.shuffle(shuffle_idxs)
+                            X = X[shuffle_idxs]
+                            y = y[shuffle_idxs]
+                            da = da[shuffle_idxs]
+
+                            print "Training on transcription factor", trans_f, '/'
 
                             batch_train_losses = []
                             for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
@@ -345,8 +342,18 @@ class MultiConvNet:
                                              self.tf_dnase_features: batch_dnase_features,
                                              self.trans_f_index: trans_f_idx
                                              }
-                                _, r_loss = \
-                                    session.run([optimizer, loss], feed_dict=feed_dict)
+                                if offset % 1000000 == 0:
+                                    _, r_loss, (reshaped_logits, reshaped_labels, logits, labels, predictions, entropies) = \
+                                        session.run([optimizer, loss, debug], feed_dict=feed_dict)
+                                    idx = np.where(reshaped_labels == 1)[0]
+                                    print 'bound mean', np.mean(predictions[idx, 30]), 'std', np.std(
+                                        predictions[idx, 30])
+                                    print 'unbound mean', np.mean(predictions[~idx, 30]), 'std', np.std(
+                                        predictions[~idx, 30])
+                                    pdb.set_trace()
+                                else:
+                                    _, r_loss = \
+                                        session.run([optimizer, loss], feed_dict=feed_dict)
                                 batch_train_losses.append(r_loss)
                             print "Batch loss", np.mean(np.array(batch_train_losses))
                             train_losses.extend(batch_train_losses)
