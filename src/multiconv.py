@@ -96,7 +96,7 @@ def calc_regression_loss(prediction, actual):
 
 class EarlyStopping:
     def __init__(self, max_stalls):
-        self.best_loss = 100
+        self.best_loss = 50000
         self.num_stalls = 0
         self.max_stalls = max_stalls
 
@@ -200,51 +200,57 @@ class MultiConvNet:
                     print
                     print "EPOCH\tTRAIN LOSS\tVALID LOSS\tVALID ACCURACY\tTIME"
 
-                ids = self.datagen.get_bound_positions()
-                X = self.datagen.get_sequece_from_ids(ids, self.segment)
-                num_examples = X.shape[0]
+                #ids = self.datagen.get_bound_positions()
+                #X = self.datagen.get_sequece_from_ids(ids, self.segment)
+                #ids = range(4000000)
+                #X = self.datagen.get_sequece_from_ids(ids, self.segment)
+
 
                 # Training
                 for epoch in xrange(1, self.num_epochs + 1):
                     train_losses = []
-                    start_time = time.time()
-                    comb_counter = 0
+                    for chunk_id in range(10, 21):
+                        ids = range((chunk_id - 1) * 1000000, chunk_id * 1000000)
+                        X = self.datagen.get_sequece_from_ids(ids, self.segment)
+                        num_examples = X.shape[0]
+                        start_time = time.time()
+                        comb_counter = 0
 
-                    for celltype in celltypes:
+                        for celltype in celltypes:
 
-                        print "Loading data for", len(ids), "examples"
-                        da = np.load('../data/preprocess/DNASE_FEATURES_NORM/%s_%s_600.gz.npy'
-                                     % (celltype, self.segment))[ids]
-                        y = np.load('../data/preprocess/features/y_%s.npy' % celltype)[ids]
-                        print 'Data for celltype', celltype, 'loaded.'
+                            print "Loading data for", len(ids), "examples"
+                            da = np.load('../data/preprocess/DNASE_FEATURES_NORM/%s_%s_600.gz.npy'
+                                         % (celltype, self.segment))[ids]
+                            y = np.load('../data/preprocess/features/y_%s.npy' % celltype)[ids]
+                            print 'Data for celltype', celltype, 'loaded.'
 
-                        shuffle_idxs = np.arange(X.shape[0])
-                        np.random.shuffle(shuffle_idxs)
-                        X = X[shuffle_idxs]
-                        y = y[shuffle_idxs]
-                        da = da[shuffle_idxs]
+                            shuffle_idxs = np.arange(X.shape[0])
+                            np.random.shuffle(shuffle_idxs)
+                            X = X[shuffle_idxs]
+                            y = y[shuffle_idxs]
+                            da = da[shuffle_idxs]
 
-                        comb_counter += 1
+                            comb_counter += 1
 
-                        batch_train_losses = []
-                        for offset in xrange(0, num_examples - self.batch_size, self.batch_size):
-                            end = offset + self.batch_size
-                            batch_sequence = np.reshape(X[offset:end, :, :],
-                                                        (self.batch_size, self.height, self.sequence_width,
-                                                         self.num_channels))
-                            batch_labels = np.reshape(y[offset:end, :], (self.batch_size, self.num_outputs))
-                            batch_dnase_features = np.reshape(da[offset:end, :self.num_dnase_features],
-                                                              (self.batch_size, self.num_dnase_features))
-                            feed_dict = {self.tf_sequence: batch_sequence,
-                                         self.tf_train_labels: batch_labels,
-                                         self.keep_prob: 1 - self.dropout_rate,
-                                         self.tf_dnase_features: batch_dnase_features,
-                                         }
-                            _, r_loss = \
-                                session.run([optimizer, loss], feed_dict=feed_dict)
-                            batch_train_losses.append(r_loss)
-                        print "Batch loss", np.mean(np.array(batch_train_losses))
-                        train_losses.extend(batch_train_losses)
+                            batch_train_losses = []
+                            for offset in xrange(0, num_examples - self.batch_size, self.batch_size):
+                                end = offset + self.batch_size
+                                batch_sequence = np.reshape(X[offset:end, :, :],
+                                                            (self.batch_size, self.height, self.sequence_width,
+                                                             self.num_channels))
+                                batch_labels = np.reshape(y[offset:end, :], (self.batch_size, self.num_outputs))
+                                batch_dnase_features = np.reshape(da[offset:end, :self.num_dnase_features],
+                                                                  (self.batch_size, self.num_dnase_features))
+                                feed_dict = {self.tf_sequence: batch_sequence,
+                                             self.tf_train_labels: batch_labels,
+                                             self.keep_prob: 1 - self.dropout_rate,
+                                             self.tf_dnase_features: batch_dnase_features,
+                                             }
+                                _, r_loss = \
+                                    session.run([optimizer, loss], feed_dict=feed_dict)
+                                batch_train_losses.append(r_loss)
+                            print "Batch loss", np.mean(np.array(batch_train_losses))
+                            train_losses.extend(batch_train_losses)
 
                     train_losses = np.array(train_losses)
                     t_loss = np.mean(train_losses)

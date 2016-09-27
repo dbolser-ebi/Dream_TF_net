@@ -7,9 +7,9 @@ import argparse
 class Evaluator:
     def __init__(self, mode):
         self.datagen = DataGenerator()
-        self.model = MultiConvNet('../log', batch_size=512, num_epochs=10, sequence_width=600, num_outputs=self.datagen.num_trans_fs,
+        self.model = MultiConvNet('../log', batch_size=512, num_epochs=1, sequence_width=600, num_outputs=self.datagen.num_trans_fs,
                              eval_size=.2, early_stopping=10, num_dnase_features=13, dropout_rate=.25,
-                             config=7, verbose=True, name='multiconvnet_'+mode, segment='train', learning_rate=0.01)
+                             config=7, verbose=True, name='multiconvnet_'+mode, segment='train', learning_rate=0.001)
         self.mode = mode
 
     def print_results_tf(self, trans_f, y_test, y_pred):
@@ -106,13 +106,16 @@ class Evaluator:
         if self.mode == 'FA':
             celltypes = self.datagen.get_celltypes()
         elif self.mode == 'FTF':
-            celltypes = self.datagen.get_celltypes_for_trans_f('CTCF')[:2]
+            celltypes = self.datagen.get_celltypes_for_trans_f('CTCF')
 
         for celltype in held_out_celltypes:
             try:
                 celltypes.remove(celltype)
             except:
                 continue
+
+        celltypes = celltypes[:4]
+
         if self.mode == 'FA':
             self.model.fit_all(celltypes)
         elif self.mode == 'FTF':
@@ -125,8 +128,6 @@ class Evaluator:
             y_pred = self.model.predict(celltype)
             for trans_f in self.datagen.get_trans_fs():
                 if celltype not in self.datagen.get_celltypes_for_trans_f(trans_f):
-                    continue
-                if trans_f != 'CTCF':
                     continue
                 self.print_results_tf(trans_f, y_test[:2702470], y_pred)
 
