@@ -203,28 +203,23 @@ def preprocess_chipseq(num_jobs, bin_size):
 
 def parallel_normalize_dnaseq(ifpath, ofpath):
     print ifpath
-    dnase_features = pd.read_csv(ifpath, delimiter=" ", dtype=np.float16, header=None)
-    # downsample
-    dnase_features = np.array(dnase_features, dtype=np.float16)
-    #dnase_features = np.hstack((dnase_features[:, :3], dnase_features[:, 3::6]))
-    np.save(ofpath+'_non_norm.npy', dnase_features.astype(np.float16))
-    '''
+    dnase_features = pd.read_csv(ifpath, delimiter=" ", dtype=np.float32, header=None)
+
     dnase_norm = StandardScaler().fit_transform(dnase_features)
     dnase_norm[np.isnan(dnase_norm)] = 0
     dnase_norm[np.isinf(dnase_norm)] = 0
 
-    np.save(ofpath+'.npy', dnase_norm.astype(np.float16))
-    '''
+    np.save(ofpath+'.npy', dnase_norm)
 
 
-def normalize_dnaseq(num_jobs):
+def normalize_dnaseq(num_jobs, bin_size):
     in_dir_path = '../data/preprocess/DNASE_FEATURES/'
     out_dir_path = '../data/preprocess/DNASE_FEATURES_NORM/'
     if not os.path.exists(out_dir_path):
         os.makedirs(out_dir_path)
     processes = []
     for fname in os.listdir(in_dir_path):
-        if "600" in fname:
+        if str(bin_size) in fname:
             ifpath = os.path.join(in_dir_path, fname)
             ofpath = os.path.join(out_dir_path, fname)
 
@@ -257,5 +252,5 @@ if __name__ == '__main__':
     if args.chipseq:
         preprocess_chipseq(num_jobs, bin_size)
     if args.norm_dnase:
-        normalize_dnaseq(num_jobs)
+        normalize_dnaseq(num_jobs, bin_size)
 

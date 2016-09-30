@@ -5,12 +5,15 @@ import argparse
 
 
 class Evaluator:
-    def __init__(self, mode):
+    def __init__(self, mode, epochs=None, celltypes=None, batch_size=None):
+
         self.datagen = DataGenerator()
-        self.model = MultiConvNet('../log', batch_size=512, num_epochs=1, sequence_width=600, num_outputs=self.datagen.num_trans_fs,
-                             eval_size=.2, early_stopping=10, num_dnase_features=13, dropout_rate=.25,
-                             config=7, verbose=True, name='multiconvnet_'+mode, segment='train', learning_rate=0.001)
+        self.model = MultiConvNet('../log/', batch_size=512 if batch_size is None else batch_size, num_epochs=1 if epochs is None else epochs,
+                                  sequence_width=600, num_outputs=self.datagen.num_trans_fs,
+                             eval_size=.2, early_stopping=10, num_dnase_features=63, dropout_rate=.25,
+                             config=1, verbose=True, name='multiconvnet_'+str(mode)+str(epochs)+str(celltypes)+str(batch_size), segment='train', learning_rate=0.001)
         self.mode = mode
+        self.celltypes = celltypes
 
     def print_results_tf(self, trans_f, y_test, y_pred):
         trans_f_idx = self.datagen.get_trans_f_lookup()[trans_f]
@@ -25,62 +28,65 @@ class Evaluator:
         print 'RECALL AT FDR 0.1', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.10)
         print 'RECALL AT FDR 0.05', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.05)
 
-    def make_predictions(self, leaderboard=True):
-        tf_leaderboard = {
-            'ARID3A': ['K562'],
-            'ATF2': ['K562'],
-            'ATF3': ['liver'],
-            'ATF7': ['MCF-7'],
-            'CEBPB': ['MCF-7'],
-            'CREB1': ['MCF-7'],
-            'CTCF': ['GM12878'],
-            'E2F6': ['K562'],
-            'EGR1': ['K562'],
-            'EP300': ['MCF-7'],
-            'FOXA1': ['MCF-7'],
-            'GABPA': ['K562'],
-            'GATA3': ['MCF-7'],
-            'JUND': ['H1-hESC'],
-            'MAFK': ['K562', 'MCF-7'],
-            'MAX': ['MCF-7'],
-            'MYC': ['HepG2'],
-            'REST': ['K562'],
-            'RFX5': ['HepG2'],
-            'SPI1': ['K562'],
-            'SRF': ['MCF-7'],
-            'STAT3': ['GM12878'],
-            'TAF1': ['HepG2'],
-            'TCF12': ['K562'],
-            'TCF7L2': ['MCF-7'],
-            'TEAD4': ['MCF-7'],
-            'YY1': ['K562'],
-            'ZNF143': ['k562']
-        }
-        tf_final = {
-            'ATF2': ['HEPG2'],
-            'CTCF': ['PC-3', 'induced_pluripotent_stem_cell'],
-            'E2F1': ['K562'],
-            'EGR1': ['liver'],
-            'FOXA1': ['liver'],
-            'FOXA2': ['liver'],
-            'GABPA': ['liver'],
-            'HNF4A': ['liver'],
-            'JUND': ['liver'],
-            'MAX': ['liver'],
-            'NANOG': ['induced_pluripotent_stem_cell'],
-            'REST': ['liver'],
-            'TAF1': ['liver']
-        }
+    def make_predictions(self):
 
-        tf_mapper = tf_leaderboard if leaderboard else tf_final
-        tf_lookup = self.datagen.get_trans_f_lookup()
+        for leaderboard in [True, False]:
+            self.model.set_segment('ladder' if leaderboard else 'test')
+            tf_leaderboard = {
+                'ARID3A': ['K562'],
+                'ATF2': ['K562'],
+                'ATF3': ['liver'],
+                'ATF7': ['MCF-7'],
+                'CEBPB': ['MCF-7'],
+                'CREB1': ['MCF-7'],
+                'CTCF': ['GM12878'],
+                'E2F6': ['K562'],
+                'EGR1': ['K562'],
+                'EP300': ['MCF-7'],
+                'FOXA1': ['MCF-7'],
+                'GABPA': ['K562'],
+                'GATA3': ['MCF-7'],
+                'JUND': ['H1-hESC'],
+                'MAFK': ['K562', 'MCF-7'],
+                'MAX': ['MCF-7'],
+                'MYC': ['HepG2'],
+                'REST': ['K562'],
+                'RFX5': ['HepG2'],
+                'SPI1': ['K562'],
+                'SRF': ['MCF-7'],
+                'STAT3': ['GM12878'],
+                'TAF1': ['HepG2'],
+                'TCF12': ['K562'],
+                'TCF7L2': ['MCF-7'],
+                'TEAD4': ['MCF-7'],
+                'YY1': ['K562'],
+                'ZNF143': ['k562']
+            }
+            tf_final = {
+                'ATF2': ['HEPG2'],
+                'CTCF': ['PC-3', 'induced_pluripotent_stem_cell'],
+                'E2F1': ['K562'],
+                'EGR1': ['liver'],
+                'FOXA1': ['liver'],
+                'FOXA2': ['liver'],
+                'GABPA': ['liver'],
+                'HNF4A': ['liver'],
+                'JUND': ['liver'],
+                'MAX': ['liver'],
+                'NANOG': ['induced_pluripotent_stem_cell'],
+                'REST': ['liver'],
+                'TAF1': ['liver']
+            }
 
-        inv_mapping = {}
-        for transcription_factor in tf_mapper.keys():
-            for celltype in tf_mapper[transcription_factor]:
-                if celltype not in inv_mapping:
-                    inv_mapping[celltype] = []
-                inv_mapping[celltype].append(transcription_factor)
+            tf_mapper = tf_leaderboard if leaderboard else tf_final
+            tf_lookup = self.datagen.get_trans_f_lookup()
+
+            inv_mapping = {}
+            for transcription_factor in tf_mapper.keys():
+                for celltype in tf_mapper[transcription_factor]:
+                    if celltype not in inv_mapping:
+                        inv_mapping[celltype] = []
+                    inv_mapping[celltype].append(transcription_factor)
 
             for test_celltype in inv_mapping.keys():
                 y_pred = self.model.predict(test_celltype)
@@ -108,13 +114,15 @@ class Evaluator:
         elif self.mode == 'FTF':
             celltypes = self.datagen.get_celltypes_for_trans_f('CTCF')
 
+        if self.celltypes.strip().upper() == 'One'.upper():
+            print "running on one celltype"
+            celltypes = ['HepG2']
+
         for celltype in held_out_celltypes:
             try:
                 celltypes.remove(celltype)
             except:
                 continue
-
-        celltypes = celltypes[:4]
 
         if self.mode == 'FA':
             self.model.fit_all(celltypes)
@@ -129,12 +137,17 @@ class Evaluator:
             for trans_f in self.datagen.get_trans_fs():
                 if celltype not in self.datagen.get_celltypes_for_trans_f(trans_f):
                     continue
-                self.print_results_tf(trans_f, y_test[:2702470], y_pred)
+                self.print_results_tf(trans_f, y_test, y_pred)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', help='FA/FTF')
+    parser.add_argument('--mode', help='FA/FTF', required=True)
+    parser.add_argument('--num_epochs', '-ne', help='Number of epochs', required=False, type=int)
+    parser.add_argument('--celltypes', '-ct', help='All/One', required=False)
+    parser.add_argument('--seperate_cost', '-sc', action='store_true', help='Seperate cost for bound and unbound', required=False)
+    parser.add_argument('--deep_wide', '-dw', action='store_true', help='Use a deeper and wider architecture', required=False)
+    parser.add_argument('--batch_size', '-batch', help='Batch size', required=False, type=int)
     args = parser.parse_args()
-    evaluator = Evaluator(args.mode)
+    evaluator = Evaluator(args.mode, args.num_epochs, args.celltypes, args.batch_size)
     evaluator.run_benchmark()

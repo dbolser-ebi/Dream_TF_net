@@ -6,11 +6,10 @@ from enum import Enum
 import math
 import random
 import warnings
-from sklearn.decomposition import PCA
-from subprocess import call, Popen, PIPE
+from datagen import *
 import re
 import bisect
-import mmap
+
 
 # Low mem overhead splitting
 def split_iter(string):
@@ -85,6 +84,7 @@ class DataReader:
         self.label_path = 'chipseq_labels/'
         self.hg19 = Fasta(os.path.join(datapath, 'annotations/hg19.genome.fa'))
         self.preprocess_path = 'preprocess/'
+        self.datagen = DataGenerator()
 
         # constants
         self.stride = 50
@@ -393,9 +393,6 @@ class DataReader:
                     features = np.vstack((features, tpm1))
         shiftscaled = (features - np.mean(features, axis=0)) / (np.std(features, axis=0) + 1)
         return shiftscaled[idxs]
-        #pca = PCA(whiten=True)
-        #features = pca.fit_transform(features)
-        #return features[idxs]
 
     def get_chromosomes(self):
         chromosomes =['chr7', 'chr6', 'chr5', 'chr4', 'chr3', 'chr2',
@@ -437,10 +434,6 @@ class DataReader:
         # Try Autosome mono
         AUTOSOME_mono_dir = os.path.join(self.datapath, 'preprocess/autosome/mono_pwm')
         get_motif(AUTOSOME_mono_dir, unpack=False, skiprows=1)
-
-        # Try Autosome di
-        #AUTOSOME_di_dir = os.path.join(self.datapath, 'preprocess/autosome/di_pwm')
-        #get_motif(AUTOSOME_di_dir, unpack=False, skiprows=1)
 
         return motifs
 
@@ -504,8 +497,7 @@ class DataReader:
         return dnase_lists
 
     def generate_position_tree(self, transcription_factor, celltypes, options=[],
-                                unbound_fraction=1, ambiguous_as_bound=False,
-                                bin_size=200, celltypes_train=None):
+                                unbound_fraction=1, ambiguous_as_bound=False):
         position_tree = set()  # keeps track of which lines (chr, start) to include
 
         if CrossvalOptions.filter_on_DNase_peaks in options:
@@ -550,6 +542,7 @@ class DataReader:
                         unbound_lines[:int(min(len(bound_lines) * unbound_fraction, len(unbound_lines)))])
                 position_tree.update(set(bound_lines))
 
+
         elif CrossvalOptions.random_shuffle_10_percent in options:
             with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
                 fin.readline()
@@ -557,7 +550,50 @@ class DataReader:
                 random.shuffle(a)
                 position_tree.update(a[:int(0.1 * len(a))])
 
+
         return position_tree
+
+    def get_dnase_labels(self, part, celltypes, position_tree):
+        dnase_lists = self.get_DNAse_conservative_peak_lists(celltypes)
+        dnase_labels = None
+        with gzip.open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.bed.gz') % part) as fin:
+            for l_idx, line in enumerate(fin):
+                if len(position_tree) == 0 or l_idx in position_tree:
+                    tokens = line.split()
+                    start = int(tokens[1])
+                    chromosome = tokens[0]
+                    # find position in dnase on the left in sorted order
+                    dnase_labels = np.zeros((1, len(celltypes)), dtype=np.float32)
+                    for c_idx, celltype in enumerate(celltypes):
+                        dnase_pos = bisect.bisect_left(dnase_lists[c_idx], (chromosome, start, start + 200))
+                        # check left
+                        if dnase_pos < len(dnase_lists[c_idx]):
+                            dnase_chr, dnase_start, dnase_end = dnase_lists[c_idx][dnase_pos]
+                            if dnase_start <= start + 200 and start <= dnase_end:
+                                dnase_labels[:, c_idx] = 1
+                        # check right
+                        if dnase_pos + 1 < len(dnase_lists[c_idx]):
+                            dnase_chr, dnase_start, dnase_end = dnase_lists[c_idx][dnase_pos + 1]
+                            if dnase_start <= start + 200 and start <= dnase_end:
+                                dnase_labels[:, c_idx] = 1
+        return dnase_labels
+
+    def get_train_data(self, part, transcription_factor, celltypes, options=[],
+                                unbound_fraction=1, ambiguous_as_bound=False, bin_size=600, dnase_bin_size=600):
+        position_tree = self.generate_position_tree(transcription_factor, celltypes, options, unbound_fraction, ambiguous_as_bound)
+        ids = list(position_tree)
+
+        trans_f_lookup = self.datagen.get_trans_f_lookup()
+        X = self.datagen.get_sequece_from_ids(ids, part, bin_size)
+        dnase_features = np.zeros((len(ids), 1+3+dnase_bin_size/10-1, len(celltypes)), dtype=np.float32)
+        labels = np.zeros((len(ids), len(celltypes)), dtype=np.float32)
+
+        for c_idx, celltype in enumerate(celltypes):
+            dnase_features[:, :, c_idx] = np.load('../data/preprocess/DNASE_FEATURES_NORM/%s_%s_%d.gz.npy' % (celltype, part, dnase_bin_size))[ids]
+            labels[:, c_idx] = \
+                np.load('../data/preprocess/features/y_%s.npy' % celltype)[ids, trans_f_lookup[transcription_factor]]
+
+        return X, dnase_features, labels
 
     def generate_cross_celltype(self, part, transcription_factor, celltypes, num_dnase_features, options=[],
                                 unbound_fraction=1, ambiguous_as_bound=False,
@@ -643,7 +679,6 @@ class DataReader:
                 for handler in dnase_feature_handlers:
                     dnase_feature_lines.append(handler.next())
 
-
                 if len(position_tree) == 0 or l_idx in position_tree:
                     tokens = line.split()
                     bound_states = tokens[3:]
@@ -690,8 +725,6 @@ class DataReader:
 
             for handler in dnase_feature_handlers:
                 handler.close()
-
-
 
 if __name__ == '__main__':
     datareader = DataReader('../data/')

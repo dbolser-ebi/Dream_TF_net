@@ -60,8 +60,22 @@ def calc_loss(logits, labels):
     logits_known = tf.gather(logits, index)
     labels_known = tf.gather(labels, index)
     entropies = tf.nn.sigmoid_cross_entropy_with_logits(logits_known, labels_known)
-
     return tf.reduce_mean(entropies)
+
+
+def calc_seperate_loss(logits, labels):
+    logits = tf.reshape(logits, [-1])
+    labels = tf.reshape(labels, [-1])
+    index = tf.where(tf.not_equal(labels, tf.constant(-1, dtype=tf.float32)))
+    logits_known = tf.gather(logits, index)
+    labels_known = tf.gather(labels, index)
+    index_bound = tf.where(tf.equal(labels, tf.constant(1, dtype=tf.float32)))
+    index_unbound = tf.where(tf.equal(labels, tf.constant(0, dtype=tf.float32)))
+    entropies = tf.nn.sigmoid_cross_entropy_with_logits(logits_known, labels_known)
+    entropies_bound = tf.gather(entropies, index_bound)
+    entropies_unbound = tf.gather(entropies, index_unbound)
+
+    return tf.add(tf.mul(tf.reduce_mean(entropies_bound), tf.constant(5, dtype=tf.float32)), tf.reduce_mean(entropies_unbound))
 
 
 def calc_loss_for_tf(logits, labels, tf_index):
@@ -116,9 +130,10 @@ class MultiConvNet:
     def __init__(self, model_dir, batch_size=256, num_channels=4, num_epochs=2,
                  sequence_width=200, num_outputs=1, eval_size=0.2, early_stopping=100,
                 num_dnase_features=4, dropout_rate=.5,
-                 config=1, verbose=True, name='convnet', segment='train', learning_rate=0.001):
+                 config=1, verbose=True, name='convnet', segment='train', learning_rate=0.001, seperate_cost=False, deep_wide=False):
         if config is None:
             config = 1
+        self.seperate_cost = seperate_cost
         self.learning_rate = learning_rate
         self.segment = segment
         self.name = name
@@ -141,27 +156,50 @@ class MultiConvNet:
         self.trans_f_index = tf.placeholder(tf.int32, name='tf_index')
         self.early_stopping = EarlyStopping(max_stalls=early_stopping)
         self.dropout_rate = dropout_rate
-        self.logits = self.get_model()
+        if deep_wide:
+            self.logits = self.get_deep_wide_model()
+        else:
+            self.logits = self.get_model()
         self.datagen = DataGenerator()
 
-    def get_model(self):
+    def set_segment(self, segment):
+        self.segment = segment
+
+    def get_deep_wide_model(self):
         with tf.variable_scope(self.name) as main_scope:
             with tf.variable_scope('DNASE') as scope:
                 dnase_features = self.tf_dnase_features
 
             with tf.variable_scope('R_MOTIF') as scope:
-                with tf.variable_scope('conv15_15') as convscope:
+                with tf.variable_scope('conv1') as convscope:
                     kernel_width = 15
-                    num_filters = 30
-                    activation = convolution2d(self.tf_sequence, num_filters, [self.height, kernel_width])
+                    num_filters = 100
+                    activation_1 = convolution2d(self.tf_sequence, num_filters, [self.height, kernel_width])
 
-                with tf.variable_scope('pool35') as poolscope:
+                with tf.variable_scope('pool1') as poolscope:
                     pool_width = 35
-                    pool = tf.nn.relu(max_pool_1xn(activation, pool_width))
+                    pool_1 = tf.nn.relu(max_pool_1xn(activation_1, pool_width))
 
-                with tf.variable_scope('fc100') as fcscope:
-                    flattened = flatten(pool)
-                    drop_rmotif = fully_connected(flattened, 100)
+                with tf.variable_scope('conv2') as convscope:
+                    kernel_width = 10
+                    num_filters = 100
+                    activation_2 = convolution2d(self.tf_sequence, num_filters, [self.height, kernel_width])
+
+                with tf.variable_scope('pool2') as poolscope:
+                    pool_width = 35
+                    pool_2 = tf.nn.relu(max_pool_1xn(activation_2, pool_width))
+
+                with tf.variable_scope('fc1000') as fcscope:
+                    flattened = flatten(pool_1)
+                    drop_rmotif_1 = fully_connected(flattened, 1000)
+
+                with tf.variable_scope('fc1000') as fcscope:
+                    flattened = flatten(pool_2)
+                    drop_rmotif_2 = fully_connected(flattened, 1000)
+
+                with tf.variable_scope('fc1000') as fcscope:
+                    flattened = flatten(tf.concat(1, [drop_rmotif_1, drop_rmotif_2]))
+                    drop_rmotif = fully_connected(flattened, 1000)
 
             with tf.variable_scope('MERGE') as scope:
                 with tf.variable_scope('merge_drop') as mergescope:
@@ -173,7 +211,44 @@ class MultiConvNet:
                         merged = tf.concat(1, [dnase_features])
 
                 with tf.variable_scope('fc') as fcscope:
-                    activation = fully_connected(merged, 100)
+                    activation = fully_connected(merged, 1000)
+                    drop = tf.nn.dropout(activation, self.keep_prob)
+
+                with tf.variable_scope('output') as outscope:
+                    logits = fully_connected(drop, self.num_outputs, None)
+
+        return logits
+
+    def get_model(self):
+        with tf.variable_scope(self.name) as main_scope:
+            with tf.variable_scope('DNASE') as scope:
+                dnase_features = self.tf_dnase_features
+
+            with tf.variable_scope('R_MOTIF') as scope:
+                with tf.variable_scope('conv15_15') as convscope:
+                    kernel_width = 12
+                    num_filters = 100
+                    activation = convolution2d(self.tf_sequence, num_filters, [self.height, kernel_width])
+
+                with tf.variable_scope('pool35') as poolscope:
+                    pool_width = 35
+                    pool = tf.nn.relu(max_pool_1xn(activation, pool_width))
+
+                with tf.variable_scope('fc100') as fcscope:
+                    flattened = flatten(pool)
+                    drop_rmotif = fully_connected(flattened, 1000)
+
+            with tf.variable_scope('MERGE') as scope:
+                with tf.variable_scope('merge_drop') as mergescope:
+                    if self.config == int(configuration.SEQ):
+                        merged = tf.concat(1, [drop_rmotif])
+                    elif self.config == int(configuration.SEQ_DNASE):
+                        merged = tf.concat(1, [drop_rmotif, dnase_features])
+                    elif self.config == int(configuration.DNASE):
+                        merged = tf.concat(1, [dnase_features])
+
+                with tf.variable_scope('fc') as fcscope:
+                    activation = fully_connected(merged, 1000)
                     drop = tf.nn.dropout(activation, self.keep_prob)
 
                 with tf.variable_scope('output') as outscope:
@@ -185,10 +260,12 @@ class MultiConvNet:
         summary_writer = tf.train.SummaryWriter(self.model_dir + self.segment)
         try:
             with tf.variable_scope(self.name + '_opt') as scope:
-                loss = calc_loss(self.logits, self.tf_train_labels)
+                if self.seperate_cost:
+                    loss = calc_seperate_loss(self.logits, self.tf_train_labels)
+                else:
+                    loss = calc_loss(self.logits, self.tf_train_labels)
                 optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999).minimize(
                     loss)
-                debug = calc_entropies(self.logits, self.tf_train_labels, self.trans_f_index)
 
             saver = tf.train.Saver(
                 [var for var in tf.get_collection(tf.GraphKeys.VARIABLES) if var.op.name.startswith(self.name)])
@@ -200,21 +277,14 @@ class MultiConvNet:
                     print
                     print "EPOCH\tTRAIN LOSS\tVALID LOSS\tVALID ACCURACY\tTIME"
 
-                #ids = self.datagen.get_bound_positions()
-                #X = self.datagen.get_sequece_from_ids(ids, self.segment)
-                #ids = range(4000000)
-                #X = self.datagen.get_sequece_from_ids(ids, self.segment)
-
-
                 # Training
                 for epoch in xrange(1, self.num_epochs + 1):
                     train_losses = []
-                    for chunk_id in range(10, 21):
+                    start_time = time.time()
+                    for chunk_id in range(1, 52):
                         ids = range((chunk_id - 1) * 1000000, chunk_id * 1000000)
                         X = self.datagen.get_sequece_from_ids(ids, self.segment)
                         num_examples = X.shape[0]
-                        start_time = time.time()
-                        comb_counter = 0
 
                         for celltype in celltypes:
 
@@ -229,8 +299,6 @@ class MultiConvNet:
                             X = X[shuffle_idxs]
                             y = y[shuffle_idxs]
                             da = da[shuffle_idxs]
-
-                            comb_counter += 1
 
                             batch_train_losses = []
                             for offset in xrange(0, num_examples - self.batch_size, self.batch_size):
@@ -402,8 +470,6 @@ class MultiConvNet:
             num_test_indices = 8843011
         if self.segment == 'test':
             num_test_indices = 60519747
-
-        num_test_indices = 2702470
 
         stride = 1000000
         predictions = []
