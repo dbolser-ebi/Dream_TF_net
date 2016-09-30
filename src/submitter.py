@@ -19,7 +19,7 @@ def submit(folder, id, password):
             filename = os.path.join(folder, filename)
             f_handler = synapseclient.File(filename, parent=project)
             entity = syn.store(f_handler)
-            syn.submit(evaluation, entity, name='test')
+            syn.submit(evaluation, entity, name='test', team='Nabla')
             break
 
 if __name__ == '__main__':
