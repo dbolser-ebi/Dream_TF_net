@@ -6,6 +6,7 @@ import sqlite3
 from datagen import *
 from ensemblr import *
 
+
 class Evaluator:
 
     def __init__(self, datapath, bin_size=200, ambiguous_as_bound=False, num_dnase_features=4,
@@ -16,7 +17,6 @@ class Evaluator:
         self.num_celltypes = 14
         self.num_train_celltypes = 11
         self.datapath = datapath
-        self.datareader = DataReader(datapath)
         self.bin_size = bin_size
         self.ambiguous_as_bound = ambiguous_as_bound
         self.unbound_fraction = unbound_fraction
@@ -128,17 +128,16 @@ class Evaluator:
             'TAF1': ['liver']
         }
 
-        celltypes = self.datareader.get_celltypes_for_tf(transcription_factor)
+        celltypes = self.datagen.get_celltypes_for_tf(transcription_factor)
 
         model.set_transcription_factor(transcription_factor)
 
-        X_train, dnase_features_train, y_train = self.datareader.get_train_data(
+        X_train, dnase_features_train, y_train = self.datagen.get_train_data(
             'train',
             transcription_factor,
             celltypes,
             options=[CrossvalOptions.balance_peaks],
             unbound_fraction=unbound_fraction,
-            ambiguous_as_bound=self.ambiguous_as_bound,
             bin_size=self.bin_size,
             dnase_bin_size=self.dnase_bin_size)
 
@@ -197,22 +196,19 @@ class Evaluator:
 
 
         #--------------- TRAIN
-        celltypes = self.datareader.get_celltypes_for_tf(transcription_factor)
-        self.num_train_instances = int(self.datareader.get_num_bound_lines(transcription_factor,
-                                                                           self.ambiguous_as_bound)*(1+unbound_fraction))
+        celltypes = self.datagen.get_celltypes_for_tf(transcription_factor)
 
         model.set_transcription_factor(transcription_factor)
 
         celltypes_train = celltypes[:-1]
         celltypes_test = celltypes[-1]
 
-        X, dnase_features, y = self.datareader.get_train_data(
+        X, dnase_features, y = self.datagen.get_train_data(
                                                             'train',
                                                             transcription_factor,
                                                             celltypes,
                                                             options=[CrossvalOptions.balance_peaks],
                                                             unbound_fraction=unbound_fraction,
-                                                            ambiguous_as_bound=self.ambiguous_as_bound,
                                                             bin_size=self.bin_size,
                                                             dnase_bin_size=self.dnase_bin_size)
 
@@ -222,17 +218,14 @@ class Evaluator:
         y_train = y[:, :-1]
         y_valid = y[:, -1]
 
-        gene_expression_features = self.datareader.get_gene_expression_tpm(celltypes_train)
-        model.fit(X, y_train, None,
-                  gene_expression_features, dnase_features_train)
 
-        gene_expression_features = self.datareader.get_gene_expression_tpm(celltypes_test)
-        predictions = model.predict(X, None, gene_expression_features, dnase_features_valid)
+        model.fit(X, y_train, None,
+                  None, dnase_features_train)
+
+        predictions = model.predict(X, None, None, dnase_features_valid)
 
         print 'TRAINING COMPLETED'
         self.print_results(y_valid, predictions.astype(np.float16))
-
-        #del data
 
         # --------------- VALIDATION
         print

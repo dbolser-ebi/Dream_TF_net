@@ -8,6 +8,13 @@ import pdb
 import pandas as pd
 from random import shuffle
 import random
+from enum import Enum
+
+
+class CrossvalOptions(Enum):
+    filter_on_DNase_peaks = 1
+    balance_peaks = 2
+    random_shuffle_10_percent = 3
 
 
 class DataGenerator:
@@ -29,6 +36,9 @@ class DataGenerator:
         if not os.path.exists(self.save_dir):
             os.mkdir(self.save_dir)
 
+
+    ###################### UTILITIES #############################################################
+
     def get_celltypes_for_trans_f(self, transcription_factor):
         '''
         Returns the list of celltypes for that particular transcription factor
@@ -48,7 +58,6 @@ class DataGenerator:
         celltypes = list(set(celltypes))
         return celltypes
 
-    ## UTILITIES
     def get_trans_fs(self):
         '''
         Returns the list of all TFs
@@ -69,6 +78,25 @@ class DataGenerator:
         celltypes = list(set(celltypes))
         return celltypes
 
+    def get_celltypes_for_tf(self, transcription_factor):
+        '''
+        Returns the list of celltypes for that particular transcription factor
+        :param datapath: Path to the label directory
+        :param transcription_factor: TF to Crossval
+        :return: celltypes, a list of celltype for that TF
+        '''
+        files = [f for f in os.listdir(os.path.join(self.datapath, self.label_path))]
+        celltypes = []
+        for f_name in files:
+            if transcription_factor in f_name:
+                fpath = os.path.join(self.datapath, os.path.join(self.label_path, f_name))
+                with gzip.open(fpath) as fin:
+                    header_tokens = fin.readline().split()
+                    celltypes = header_tokens[3:]
+                break
+        celltypes = list(set(celltypes))
+        return celltypes
+
     def sequence_to_one_hot(self, sequence):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -83,7 +111,148 @@ class DataGenerator:
             encoding[(sequence == 'T') | (sequence == 't'), 3] = 1
             return encoding
 
-    # FEATURE GENERATION
+    def get_bound_lookup(self):
+        lookup = {}
+        trans_f_lookup = self.get_trans_f_lookup()
+
+        for celltype in self.get_celltypes():
+            for trans_f in self.get_trans_fs():
+                print celltype, trans_f, self.get_celltypes_for_trans_f(trans_f)
+                if celltype not in self.get_celltypes_for_trans_f(trans_f):
+                    continue
+                y = np.load(os.path.join(self.save_dir, 'y_%s.npy' % celltype))
+                lookup[(trans_f, celltype)] = np.where(y[:, trans_f_lookup[trans_f]] == 1)
+        return lookup
+
+    def get_bound_for_celltype(self, celltype):
+        save_path = os.path.join(self.save_dir, 'bound_positions_%s.npy' % celltype)
+        if os.path.exists(save_path):
+            positions = np.load(save_path)
+        else:
+            print "Getting bound locations for celltype", celltype
+            y = np.load(os.path.join(self.save_dir, 'y_%s.npy' % celltype))
+            y = np.max(y, axis=1)
+            positions = np.where(y == 1)[0]
+            np.save(save_path, positions)
+        return positions
+
+    def get_bound_for_trans_f(self, trans_f):
+        trans_f_lookup = self.get_trans_f_lookup()
+        save_path = os.path.join(self.save_dir, 'bound_positions_%s.npy' % trans_f)
+        if os.path.exists(save_path):
+            positions = np.load(save_path)
+        else:
+            positions = []
+            print "Getting bound locations for transcription factor", trans_f
+            for celltype in self.get_celltypes_for_trans_f(trans_f):
+                y = np.load(os.path.join(self.save_dir, 'y_%s.npy' % celltype))
+                bound_locations = list(np.where(y[:, trans_f_lookup[trans_f]] == 1)[0])
+                positions.extend(bound_locations)
+            positions = list(set(positions))
+            np.save(save_path, np.array(positions, dtype=np.int32))
+
+        return positions
+
+    def get_trans_f_lookup(self):
+        lookup = {}
+        for idx, trans_f in enumerate(self.get_trans_fs()):
+            lookup[trans_f] = idx
+        return lookup
+
+    def get_celltype_lookup(self):
+        lookup = {}
+        for idx, celltype in enumerate(self.get_celltypes()):
+            lookup[celltype] = idx
+        return lookup
+
+    def get_sequece_from_ids(self, ids, segment, bin_size=600):
+        id_to_position = {}
+        for i, id in enumerate(ids):
+            id_to_position[id] = i
+
+        X = np.zeros((len(ids), bin_size, self.num_channels), dtype=np.float16)
+        chunk_lookup = {}
+        for id in ids:
+            chunk_id = (id / self.chunk_size) * self.chunk_size
+            if chunk_id not in chunk_lookup:
+                chunk_lookup[chunk_id] = []
+            chunk_lookup[chunk_id].append(id)
+        for chunk_id in chunk_lookup.keys():
+            chunk = np.load(os.path.join(self.save_dir,
+                                         'segment_%s_bin_size_%d_chunk_id_%d.npy')
+                            % (segment, bin_size, chunk_id))
+            ids = chunk_lookup[chunk_id]
+            x_idxs = map(lambda x: id_to_position[x], ids)
+            ids_corrected = map(lambda x: x - chunk_id, ids)
+            X[x_idxs] = chunk[ids_corrected]
+
+        return X
+
+    def get_bound_positions(self):
+        save_path = os.path.join(self.save_dir, 'bound_positions.npy')
+        if os.path.exists(save_path):
+            bound_positions = np.load(save_path)
+        else:
+            bound_positions = []
+            print "Getting bound locations"
+            for celltype in self.get_celltypes():
+                y = np.load(os.path.join(self.save_dir, 'y_%s.npy' % celltype))
+                y = np.max(y, axis=1)
+                locations = list(np.where(y == 1)[0])
+                bound_positions.extend(locations)
+            bound_positions = np.array(list(set(bound_positions)), dtype=np.int32)
+            np.save(save_path, bound_positions)
+        return bound_positions
+
+    def generate_position_tree(self, transcription_factor, celltypes, options=CrossvalOptions.balance_peaks,
+                                unbound_fraction=1, ambiguous_as_bound=False):
+        position_tree = set()  # keeps track of which lines (chr, start) to include
+
+        if options == CrossvalOptions.balance_peaks:
+            with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+                fin.readline()
+                bound_lines = []
+                unbound_lines = []
+                # only the train set
+                for line_idx, line in enumerate(fin):
+                    if 'B' in line or (ambiguous_as_bound and 'A' in line):
+                        bound_lines.append(line_idx)
+                    else:
+                        unbound_lines.append(line_idx)
+                random.shuffle(unbound_lines)
+                if unbound_fraction > 0:
+                    bound_lines.extend(
+                        unbound_lines[:int(min(len(bound_lines) * unbound_fraction, len(unbound_lines)))])
+                position_tree.update(set(bound_lines))
+
+        elif options == CrossvalOptions.random_shuffle_10_percent:
+            with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
+                fin.readline()
+                a = range(len(fin.read().splitlines()))
+                random.shuffle(a)
+                position_tree.update(a[:int(0.1 * len(a))])
+
+        return position_tree
+
+    def get_train_data(self, part, transcription_factor, celltypes, options=CrossvalOptions.balance_peaks,
+                                unbound_fraction=1, bin_size=600, dnase_bin_size=600):
+        position_tree = self.generate_position_tree(transcription_factor, celltypes, options, unbound_fraction, ambiguous_as_bound)
+        ids = list(position_tree)
+
+        trans_f_lookup = self.get_trans_f_lookup()
+        X = self.get_sequece_from_ids(ids, part, bin_size)
+        dnase_features = np.zeros((len(ids), 1+3+dnase_bin_size/10-1, len(celltypes)), dtype=np.float32)
+        labels = np.zeros((len(ids), len(celltypes)), dtype=np.float32)
+
+        for c_idx, celltype in enumerate(celltypes):
+            dnase_features[:, :, c_idx] = np.load('../data/preprocess/DNASE_FEATURES_NORM/%s_%s_%d.gz.npy' % (celltype, part, dnase_bin_size))[ids]
+            labels[:, c_idx] = \
+                np.load('../data/preprocess/features/y_%s.npy' % celltype)[ids, trans_f_lookup[transcription_factor]]
+
+        return X, dnase_features, labels
+
+
+    ##### DATA GENERATION ##############################################################################
     def generate_sequence(self, segment, bin_size):
         if segment not in ['train', 'ladder', 'test']:
             raise Exception('Please specify the segment')
@@ -148,99 +317,6 @@ class DataGenerator:
             np.save(os.path.join(self.save_dir, 'y_%s.npy' % celltype),
                     np.reshape(y[:, :, celltype_lookup[celltype]], (self.train_length, self.num_trans_fs))
                     )
-
-    def get_bound_lookup(self):
-        lookup = {}
-        trans_f_lookup = self.get_trans_f_lookup()
-
-        for celltype in self.get_celltypes():
-            for trans_f in self.get_trans_fs():
-                print celltype, trans_f, self.get_celltypes_for_trans_f(trans_f)
-                if celltype not in self.get_celltypes_for_trans_f(trans_f):
-                    continue
-                y = np.load(os.path.join(self.save_dir, 'y_%s.npy' % celltype))
-                lookup[(trans_f, celltype)] = np.where(y[:, trans_f_lookup[trans_f]] == 1)
-        return lookup
-
-    def get_bound_for_celltype(self, celltype):
-        save_path = os.path.join(self.save_dir, 'bound_positions_%s.npy' % celltype)
-        if os.path.exists(save_path):
-            positions = np.load(save_path)
-        else:
-            print "Getting bound locations for celltype", celltype
-            y = np.load(os.path.join(self.save_dir, 'y_%s.npy' % celltype))
-            y = np.max(y, axis=1)
-            positions = np.where(y == 1)[0]
-            np.save(save_path, positions)
-        return positions
-
-    def get_bound_for_trans_f(self, trans_f):
-        trans_f_lookup = self.get_trans_f_lookup()
-        save_path = os.path.join(self.save_dir, 'bound_positions_%s.npy' % trans_f)
-        if os.path.exists(save_path):
-            positions = np.load(save_path)
-        else:
-            positions = []
-            print "Getting bound locations for transcription factor", trans_f
-            for celltype in self.get_celltypes_for_trans_f(trans_f):
-                y = np.load(os.path.join(self.save_dir, 'y_%s.npy' % celltype))
-                bound_locations = list(np.where(y[:, trans_f_lookup[trans_f]] == 1)[0])
-                positions.extend(bound_locations)
-            positions = list(set(positions))
-            np.save(save_path, np.array(positions, dtype=np.int32))
-
-        return positions
-
-    def get_trans_f_lookup(self):
-        lookup = {}
-        for idx, trans_f in enumerate(self.get_trans_fs()):
-            lookup[trans_f] = idx
-        return lookup
-
-    def get_celltype_lookup(self):
-        lookup = {}
-        for idx, celltype in enumerate(self.get_celltypes()):
-            lookup[celltype] = idx
-        return lookup
-
-    def get_sequece_from_ids(self, ids, segment, bin_size=600):
-        id_to_position = {}
-        for i, id in enumerate(ids):
-            id_to_position[id] = i
-
-        X = np.zeros((len(ids), bin_size, self.num_channels), dtype=np.float16)
-        chunk_lookup = {}
-        for id in ids:
-            chunk_id = (id/self.chunk_size)*self.chunk_size
-            if chunk_id not in chunk_lookup:
-                chunk_lookup[chunk_id] = []
-            chunk_lookup[chunk_id].append(id)
-        for chunk_id in chunk_lookup.keys():
-            chunk = np.load(os.path.join(self.save_dir,
-                                             'segment_%s_bin_size_%d_chunk_id_%d.npy')
-                                % (segment, bin_size, chunk_id))
-            ids = chunk_lookup[chunk_id]
-            x_idxs = map(lambda x: id_to_position[x], ids)
-            ids_corrected = map(lambda x: x-chunk_id, ids)
-            X[x_idxs] = chunk[ids_corrected]
-
-        return X
-
-    def get_bound_positions(self):
-        save_path = os.path.join(self.save_dir, 'bound_positions.npy')
-        if os.path.exists(save_path):
-            bound_positions = np.load(save_path)
-        else:
-            bound_positions = []
-            print "Getting bound locations"
-            for celltype in self.get_celltypes():
-                y = np.load(os.path.join(self.save_dir, 'y_%s.npy' % celltype))
-                y = np.max(y, axis=1)
-                locations = list(np.where(y == 1)[0])
-                bound_positions.extend(locations)
-            bound_positions = np.array(list(set(bound_positions)), dtype=np.int32)
-            np.save(save_path, bound_positions)
-        return bound_positions
 
 
 if __name__ == '__main__':

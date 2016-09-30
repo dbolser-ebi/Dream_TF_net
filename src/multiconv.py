@@ -1,10 +1,7 @@
 import tensorflow as tf
-import numpy as np
 import time
 from tensorflow.contrib.layers.python.layers import *
-import random
 from datagen import *
-from sklearn.cross_validation import KFold
 import pdb
 
 
@@ -83,24 +80,6 @@ def calc_loss_for_tf(logits, labels, tf_index):
     labels = labels[:, tf_index]
     entropies = tf.nn.sigmoid_cross_entropy_with_logits(logits, labels)
     return tf.reduce_mean(entropies)
-
-
-def calc_entropies(logits, labels, tf_index):
-    '''
-    logits = tf.reshape(logits, [-1])
-    labels = tf.reshape(labels, [-1])
-    comparison = tf.not_equal(labels, tf.constant(-1, dtype=tf.float32))
-    index = tf.where(comparison)
-    logits_known = tf.gather(logits, index)
-    labels_known = tf.gather(labels, index)
-    entropies = tf.nn.sigmoid_cross_entropy_with_logits(logits_known, labels_known)
-    means = tf.reduce_mean(entropies)
-    '''
-    reshaped_logits = logits[:, tf_index]
-    reshaped_labels = labels[:, tf_index]
-    predictions = tf.nn.sigmoid(logits)
-    entropies = tf.nn.sigmoid_cross_entropy_with_logits(reshaped_logits, reshaped_labels)
-    return reshaped_logits, reshaped_labels, logits, labels, predictions, entropies
 
 
 def calc_regression_loss(prediction, actual):
@@ -226,7 +205,7 @@ class MultiConvNet:
 
             with tf.variable_scope('R_MOTIF') as scope:
                 with tf.variable_scope('conv15_15') as convscope:
-                    kernel_width = 12
+                    kernel_width = 15
                     num_filters = 100
                     activation = convolution2d(self.tf_sequence, num_filters, [self.height, kernel_width])
 
@@ -351,7 +330,6 @@ class MultiConvNet:
             with tf.variable_scope(self.name+'_opt') as scope:
                 loss = calc_loss_for_tf(self.logits, self.tf_train_labels, self.trans_f_index)
                 optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999).minimize(loss)
-                debug = calc_entropies(self.logits, self.tf_train_labels, self.trans_f_index)
 
             saver = tf.train.Saver([var for var in tf.get_collection(tf.GraphKeys.VARIABLES) if var.op.name.startswith(self.name)])
 
