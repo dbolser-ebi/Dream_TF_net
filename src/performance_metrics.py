@@ -14,29 +14,6 @@ def auroc(y_true, y_model):
         auc = 0
     return auc
 
-
-def auprc_sklearn(y_true, y_model):
-    y_true = np.array(y_true, dtype=np.float32)
-    y_model = np.array(y_model, dtype=np.float32)
-    assert (y_true.size == y_model.size)
-    prec_, rec, _ = precision_recall_curve(y_true, y_model)
-
-    #interpolate curve
-    prec = prec_
-    p_temp = prec[0]
-    n = len(prec)
-
-    for i in xrange(n):
-        if prec[i] < p_temp:
-            prec[i] = p_temp
-        else:
-            p_temp = prec[i]
-
-    # calculate Area under Curve
-    result = auc(rec, prec)
-
-    return result
-
 def auprc(y_true, y_model):
     ro.globalenv['pred'] = y_model
     ro.globalenv['labels'] = y_true

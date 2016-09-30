@@ -251,6 +251,40 @@ class DataGenerator:
 
         return X, dnase_features, labels
 
+    def get_motifs_h(self, transcription_factor, verbose=False):
+        motifs = []
+
+        def get_motif(directory, unpack=True, skiprows=0, calc_pssm=False):
+            for f in os.listdir(directory):
+                if transcription_factor.upper() == f.split('_')[0].upper():
+                    motif = np.loadtxt(os.path.join(directory, f), dtype=np.float32, unpack=unpack, skiprows=skiprows)
+                    if calc_pssm:
+                        motif = self.calc_pssm(motif)
+                    if verbose:
+                        print "motif found in", directory
+                        print "motif:", f, motif.shape
+                        print motif
+                    motifs.append(motif)
+
+        # Try Jaspar
+        JASPAR_dir = os.path.join(self.datapath, 'preprocess/JASPAR/')
+        get_motif(JASPAR_dir, calc_pssm=True)
+
+        # Try SELEX
+        SELEX_dir = os.path.join(self.datapath, 'preprocess/SELEX_PWMs_for_Ensembl_1511_representatives/')
+        get_motif(SELEX_dir, calc_pssm=True)
+
+        # Try Autosome mono
+        AUTOSOME_mono_dir = os.path.join(self.datapath, 'preprocess/autosome/mono_pwm')
+        get_motif(AUTOSOME_mono_dir, unpack=False, skiprows=1)
+
+        return motifs
+
+    def calc_pssm(self, pfm, pseudocounts=0.001):
+        pfm += pseudocounts
+        norm_pwm = pfm / pfm.sum(axis=1)[:, np.newaxis]
+        return np.log2(norm_pwm / 0.25)
+
 
     ##### DATA GENERATION ##############################################################################
     def generate_sequence(self, segment, bin_size):

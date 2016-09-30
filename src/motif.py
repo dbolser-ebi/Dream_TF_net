@@ -1,6 +1,6 @@
 from jasparclient import *
 from Bio.motifs import read
-from datareader import *
+from datagen import *
 from wiggleReader import get_wiggle_output, wiggleToBedGraph, split_iter
 import argparse
 import os
@@ -11,7 +11,7 @@ from tensorflow.contrib.layers.python.layers import *
 class MotifProcessor:
 
     def __init__(self, datapath):
-        self.datareader = DataReader(datapath)
+        self.datagen = DataGenerator()
         np.set_printoptions(suppress=True)
         self.datapath = datapath
         self.preprocesspath = 'preprocess/'
@@ -20,7 +20,7 @@ class MotifProcessor:
         count = 0
         passwd = getpass.getpass()
         missing = []
-        for tf in self.datareader.get_tfs():
+        for tf in self.datagen.get_trans_fs():
             motifs = get_motifs_for_tf(tf, passwd)
             if len(motifs) > 0:
                 count += 1
@@ -30,7 +30,7 @@ class MotifProcessor:
                 print motif.name
                 with open(os.path.join(self.datapath, self.preprocesspath+'JASPAR/'+motif.name+'_'+motif.matrix_id+'.pfm'), 'w') as fout:
                     print >>fout, motif.format('pfm')
-        print "Found motifs for", count, "of", len(self.datareader.get_tfs()), "transcription factors"
+        print "Found motifs for", count, "of", len(self.datagen.get_trans_fs()), "transcription factors"
         print "Missing", missing
     '''
     def get_motifs_h(self, transcription_factor):
@@ -137,7 +137,6 @@ class MotifProcessor:
 
 
 def preprocess_scores():
-    datareader = DataReader('../data/')
     monodir = '../data/preprocess/autosome/mono_pwm'
     didir = '../data/preprocess/autosome/di_pwm'
     pssms = []

@@ -2,10 +2,10 @@ import tensorflow as tf
 import numpy as np
 from sklearn.cross_validation import StratifiedKFold, KFold
 import time
-from datareader import DataReader
 from tensorflow.contrib.layers.python.layers import *
 import xgboost as xgb
 import pdb
+from datagen import *
 
 
 class configuration:
@@ -90,7 +90,7 @@ class ConvNet:
             config = 1
         self.name = name
         self.regression = regression
-        self.datareader = DataReader(datapath)
+        self.datagen = DataGenerator()
         self.config = config
         self.num_dnase_features = num_dnase_features
         self.num_outputs = num_outputs
@@ -130,7 +130,7 @@ class ConvNet:
 
                 def get_activations_for_tf(transcription_factor):
                     result = []
-                    motifs = self.datareader.get_motifs_h(transcription_factor)
+                    motifs = self.datagen.get_motifs_h(transcription_factor)
                     if len(motifs) > 0:
                         with tf.variable_scope(transcription_factor) as tfscope:
                             for idx, pssm in enumerate(motifs):
@@ -157,7 +157,7 @@ class ConvNet:
                 if int(self.config) == int(configuration.SEQ_SHAPE_SPECIFICUSUAL) or int(self.config) == int(configuration.USUAL_DNASE):
                     activations.extend(get_activations_for_tf(self.transcription_factor))
                 else:
-                    for transcription_factor in self.datareader.get_tfs():
+                    for transcription_factor in self.datagen.get_trans_fs():
                         activations.extend(get_activations_for_tf(transcription_factor))
 
                 with tf.variable_scope('fc100') as fcscope:
@@ -414,7 +414,7 @@ class XGBoost:
                                           sequence_width, self.num_channels), name='sequences')
         self.batch_size = batch_size
         self.sequence_width = sequence_width
-        self.datareader = DataReader(datapath)
+        self.datagen = DataGenerator()
         self.config = config
         self.transcription_factor = transcription_factor
         self.activations, self.summary_op = self.get_activations()
@@ -516,7 +516,7 @@ class XGBoost:
 
             def get_activations_for_tf(transcription_factor):
                 result = []
-                motifs = self.datareader.get_motifs_h(transcription_factor)
+                motifs = self.datagen.get_motifs_h(transcription_factor)
                 if len(motifs) > 0:
                     with tf.variable_scope(transcription_factor) as tfscope:
                         for idx, pssm in enumerate(motifs):

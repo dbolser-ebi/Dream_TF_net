@@ -1,41 +1,19 @@
-from datareader import *
 from multiprocessing import Process
 import argparse
 from subprocess import Popen, PIPE
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 import pandas as pd
+import os
+import numpy as np
+import gzip
 import time
 import re
 import pdb
+from datagen import DataGenerator
 
-
-def print_num_instances_for_each_chromosome():
-    chr_size = {}
-    datareader = DataReader('../data/')
-    for idx, instance in enumerate(datareader.generate_cross_celltype('train', 'CTCF', ['MCF-7'])):
-        (chromosome, start), features, labels = instance
-        if chromosome not in chr_size:
-            chr_size[chromosome] = 0
-        chr_size[chromosome] += 1
-
-    return chr_size
-
-
-def get_num_bound_lines(amb_as_bound=False):
-    reader = DataReader('../data/')
-    bound = {}
-    for transcription_factor in reader.get_tfs():
-        with gzip.open(reader.datapath + reader.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
-            fin.readline()
-            bound_lines = []
-            # only the train set
-            for line_idx, line in enumerate(fin):
-                if 'B' in line or (amb_as_bound and 'A' in line):
-                    bound_lines.append(line_idx)
-            print transcription_factor, "num bound lines", len(bound_lines)
-            bound[transcription_factor] = len(bound_lines)
-    print bound
-
+# Low mem overhead splitting
+def split_iter(string):
+    return (x.group(0) for x in re.finditer(r"[ \t\f\v0-9A-Za-z,.=']+", string))
 
 def get_DNAse_fold_track(celltype, chromosome, left, right):
     fpath = os.path.join('../data/', 'dnase_fold_coverage/DNASE.%s.fc.signal.bigwig' % celltype)
@@ -84,10 +62,10 @@ def parralelDNAseSignalProcessor(lines, fout_path, celltype, bin_size):
 
 
 def preprocess_dnase(num_jobs, bin_size):
-    reader = DataReader('../data/')
+    datagen = DataGenerator()
     processes = []
 
-    celltypes = reader.get_celltypes()
+    celltypes = datagen.get_celltypes()
 
     for part in ['train', 'ladder', 'test']:
 
@@ -174,11 +152,11 @@ def parralelChIPSeqSignalProcessor(lines, fout_path, celltype, transcription_fac
 
 
 def preprocess_chipseq(num_jobs, bin_size):
-    reader = DataReader('../data/')
+    datagen = DataGenerator()
     processes = []
 
-    celltypes = reader.get_celltypes()
-    transcription_factors = reader.get_tfs()
+    celltypes = datagen.get_celltypes()
+    transcription_factors = datagen.get_trans_fs()
 
     for part in ['train']:
         with open('../data/annotations/%s_regions.blacklistfiltered.merged.bed' % part) as fin:
