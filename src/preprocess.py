@@ -15,6 +15,7 @@ from datagen import DataGenerator
 def split_iter(string):
     return (x.group(0) for x in re.finditer(r"[ \t\f\v0-9A-Za-z,.=']+", string))
 
+
 def get_DNAse_fold_track(celltype, chromosome, left, right):
     fpath = os.path.join('../data/', 'dnase_fold_coverage/DNASE.%s.fc.signal.bigwig' % celltype)
     process = Popen(["wiggletools", "seek", chromosome, str(left), str(right), fpath],
@@ -107,7 +108,6 @@ def normalize_chipseq(num_jobs):
     for i in range(0, len(processes), num_jobs):
         map(lambda x: x.start(), processes[i:i + num_jobs])
         map(lambda x: x.join(), processes[i:i + num_jobs])
-
 
 
 def get_ChIPSeq_fold_track(celltype, transcription_factor,  chromosome, left, right):

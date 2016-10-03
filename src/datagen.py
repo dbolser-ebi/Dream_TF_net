@@ -9,6 +9,8 @@ import pandas as pd
 from random import shuffle
 import random
 from enum import Enum
+from wiggleReader import *
+from multiprocessing import Process
 
 
 class CrossvalOptions(Enum):
@@ -188,6 +190,9 @@ class DataGenerator:
 
         return X
 
+    def get_dnase_features_from_ids(self, ids, segment, celltype, dnase_bin_size=600):
+        return np.load(os.path.join(self.save_dir, 'dnase_fold_%s_%s_%d.npy' % (segment, celltype, dnase_bin_size)))[ids]
+
     def get_bound_positions(self):
         save_path = os.path.join(self.save_dir, 'bound_positions.npy')
         if os.path.exists(save_path):
@@ -205,17 +210,16 @@ class DataGenerator:
         return bound_positions
 
     def generate_position_tree(self, transcription_factor, celltypes, options=CrossvalOptions.balance_peaks,
-                                unbound_fraction=1, ambiguous_as_bound=False):
+                                unbound_fraction=1):
         position_tree = set()  # keeps track of which lines (chr, start) to include
 
         if options == CrossvalOptions.balance_peaks:
-            with gzip.open(self.datapath + self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
-                fin.readline()
+            with gzip.open(self.label_path + transcription_factor + '.train.labels.tsv.gz') as fin:
                 bound_lines = []
                 unbound_lines = []
                 # only the train set
                 for line_idx, line in enumerate(fin):
-                    if 'B' in line or (ambiguous_as_bound and 'A' in line):
+                    if 'B' in line:
                         bound_lines.append(line_idx)
                     else:
                         unbound_lines.append(line_idx)
@@ -232,11 +236,13 @@ class DataGenerator:
                 random.shuffle(a)
                 position_tree.update(a[:int(0.1 * len(a))])
 
+        print "len position treee", len(position_tree)
+
         return position_tree
 
     def get_train_data(self, part, transcription_factor, celltypes, options=CrossvalOptions.balance_peaks,
                                 unbound_fraction=1, bin_size=600, dnase_bin_size=600):
-        position_tree = self.generate_position_tree(transcription_factor, celltypes, options, unbound_fraction, ambiguous_as_bound)
+        position_tree = self.generate_position_tree(transcription_factor, celltypes, options, unbound_fraction)
         ids = list(position_tree)
 
         trans_f_lookup = self.get_trans_f_lookup()
@@ -245,7 +251,7 @@ class DataGenerator:
         labels = np.zeros((len(ids), len(celltypes)), dtype=np.float32)
 
         for c_idx, celltype in enumerate(celltypes):
-            dnase_features[:, :, c_idx] = np.load('../data/preprocess/DNASE_FEATURES_NORM/%s_%s_%d.gz.npy' % (celltype, part, dnase_bin_size))[ids]
+            dnase_features[:, :, c_idx] = np.load('../data/preprocess/DNASE_FEATURES_NORM/%s_%s_%d.gz_non_norm.npy' % (celltype, part, dnase_bin_size))[ids]
             labels[:, c_idx] = \
                 np.load('../data/preprocess/features/y_%s.npy' % celltype)[ids, trans_f_lookup[transcription_factor]]
 
@@ -352,14 +358,82 @@ class DataGenerator:
                     np.reshape(y[:, :, celltype_lookup[celltype]], (self.train_length, self.num_trans_fs))
                     )
 
+    def generate_dnase(self, segment, bin_size, num_processes):
+
+        def get_DNAse_fold_track(celltype, chromosome, left, right):
+            fpath = os.path.join(self.datapath, 'dnase_fold_coverage/DNASE.%s.fc.signal.bigwig' % celltype)
+            process = Popen(["wiggletools", "seek", chromosome, str(left), str(right), fpath],
+                            stdout=PIPE)
+            (wiggle_output, _) = process.communicate()
+            track = np.zeros((right - left + 1,), dtype=np.float32)
+            position = 0
+            for line in split_iter(wiggle_output):
+                tokens = line.split()
+                if line.startswith('fixedStep'):
+                    continue
+                elif line.startswith('chr'):
+                    start = int(tokens[1]) + 1
+                    end = int(tokens[2])
+                    length = end - start + 1
+                    value = float(tokens[3])
+                    track[position:position + length] = value
+                    position += length
+                else:
+                    value = float(tokens[0])
+                    track[position] = value
+                    position += 1
+            return track
+
+        def DNAseSignalProcessor(lines, segment, celltype, bin_size):
+            print "parsing dnase for", segment, celltype, bin_size
+            bin_correction = max(0, (bin_size - 200) / 2)
+            if segment == 'train':
+                length = self.train_length
+            elif segment == 'ladder':
+                length = self.ladder_length
+            elif segment == 'test':
+                length = self.test_length
+            dnase_features = np.zeros((length, bin_size), dtype=np.float16)
+            idx = 0
+            for line in split_iter(lines):
+                tokens = line.split()
+                chromosome = tokens[0]
+                start = int(tokens[1])
+                end = int(tokens[2])
+                track = get_DNAse_fold_track(celltype, chromosome, start - bin_correction, end + bin_correction)
+                for pos in range(start, end - 200 + 1, 50):
+                    sbin = np.log(track[pos - start:pos - start + bin_size]+1)
+                    dnase_features[idx, :] = sbin
+                    idx += 1
+            print idx
+            np.save(os.path.join(self.save_dir, 'dnase_fold_%s_%s_%d' % (segment, celltype, bin_size)), dnase_features)
+
+        with open('../data/annotations/%s_regions.blacklistfiltered.merged.bed' % segment) as fin:
+            lines = fin.read()
+        processes = []
+        for celltype in self.get_celltypes():
+            processes.append(Process(
+                target=DNAseSignalProcessor,
+                args=(lines, segment, celltype, bin_size))
+                )
+
+        for i in range(0, len(processes), num_processes):
+            map(lambda x: x.start(), processes[i:i + num_processes])
+            map(lambda x: x.join(), processes[i:i + num_processes])
+
+    def generate_shape(self):
+        return
+
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--gen_sequence', action='store_true', required=False)
     parser.add_argument('--gen_y', action='store_true', required=False)
+    parser.add_argument('--gen_dnase', action='store_true', required=False)
     parser.add_argument('--segment', required=True)
     parser.add_argument('--bin_size', type=int, required=True)
+    parser.add_argument('--num_jobs', type=int, required=False)
 
     args = parser.parse_args()
     datagen = DataGenerator()
@@ -370,6 +444,8 @@ if __name__ == '__main__':
         datagen.generate_sequence(args.segment, args.bin_size)
     if args.gen_y:
         datagen.generate_y()
+    if args.gen_dnase:
+        datagen.generate_dnase(args.segment, args.bin_size, args.num_jobs)
 
 
 

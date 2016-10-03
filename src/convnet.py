@@ -84,7 +84,7 @@ class ConvNet:
     def __init__(self, model_dir, batch_size=256, num_channels=4, num_epochs=2,
                  sequence_width=200, num_outputs=1, eval_size=0.2, early_stopping=100,
                  num_gen_expr_features=57820, num_dnase_features=4, num_shape_features=4, dropout_rate=.5,
-                 config=1, verbose=True, datapath ='../data/', transcription_factor='CTCF', regression=False,
+                 config=1, verbose=True, transcription_factor='CTCF', regression=False,
                  name='convnet'):
         if config is None:
             config = 1
@@ -115,10 +115,178 @@ class ConvNet:
         self.early_stopping = EarlyStopping(max_stalls=early_stopping)
         self.dropout_rate = dropout_rate
         self.transcription_factor = transcription_factor
-        self.logits = self.get_model()
+        self.features = tf.placeholder(tf.float32, shape=(batch_size, self.height, sequence_width, self.num_channels+1))
+        self.logits = self.get_combined_model()
 
     def set_transcription_factor(self, transcription_factor):
         self.transcription_factor = transcription_factor
+
+    def get_combined_model(self):
+        with tf.variable_scope(self.name) as main_scope:
+            with tf.variable_scope('R_MOTIF') as scope:
+                with tf.variable_scope('conv15_15') as convscope:
+                    kernel_width = 15
+                    num_filters = 100
+                    activation = convolution2d(self.features, num_filters, [self.height, kernel_width])
+
+                with tf.variable_scope('pool35') as poolscope:
+                    pool_width = 35
+                    pool = tf.nn.relu(max_pool_1xn(activation, pool_width))
+
+                with tf.variable_scope('fc100') as fcscope:
+                    flattened = flatten(pool)
+                    drop_rmotif = fully_connected(flattened, 100)
+                    drop_rmotif = tf.nn.dropout(drop_rmotif, self.keep_prob)
+
+            with tf.variable_scope('output') as outscope:
+                logits = fully_connected(drop_rmotif, 1, None, variables_collections='test')
+
+        return logits
+
+    def fit_combined(self, X, dnase_features, y):
+        summary_writer = tf.train.SummaryWriter(self.model_dir + 'train')
+        try:
+            with tf.variable_scope(self.name+'_opt') as scope:
+                loss = calc_loss(self.logits, self.tf_train_labels)
+                optimizer = tf.train.AdamOptimizer(learning_rate=0.001, beta1=0.9, beta2=0.999).minimize(loss)
+
+            saver = tf.train.Saver([var for var in tf.get_collection(tf.GraphKeys.VARIABLES) if var.op.name.startswith(self.name)])
+
+            if self.regression:
+                kf = KFold(y.size, round(1. / self.eval_size))
+            else:
+                y_ = np.max(y, axis=1)
+                kf = StratifiedKFold(y_, round(1. / self.eval_size))
+            train_indices, valid_indices = next(iter(kf))
+
+            X_train = X[train_indices]
+            X_val = X[valid_indices]
+
+            dnase_features_train = dnase_features[train_indices]
+            dnase_features_val = dnase_features[valid_indices]
+
+            y_train = y[train_indices]
+            y_val = y[valid_indices]
+
+            print 'Train size', X_train.shape[0], 'Validation size', X_val.shape[0]
+
+            with tf.Session() as session:
+                tf.initialize_all_variables().run()
+
+                if self.verbose:
+                    print
+                    print "EPOCH\tTRAIN LOSS\tVALID LOSS\tVALID ACCURACY\tTIME"
+
+                batch_features = np.zeros((self.batch_size, self.height, self.sequence_width, self.num_channels+1))
+
+                # Training
+                for epoch in xrange(1, self.num_epochs+1):
+                    start_time = time.time()
+                    num_examples = X_train.shape[0]
+                    losses = []
+
+                    shuffle_idxs = np.arange(X_train.shape[0])
+                    np.random.shuffle(shuffle_idxs)
+                    X_train = X_train[shuffle_idxs]
+                    y_train = y_train[shuffle_idxs]
+                    dnase_features_train = dnase_features_train[shuffle_idxs]
+
+                    for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
+                        end = min(offset+self.batch_size, num_examples)
+                        for celltype_idx in xrange(y.shape[1]):
+                            batch_features[:, :, :, :self.num_channels] = \
+                                np.reshape(X_train[offset:end, :], (self.batch_size, self.height, self.sequence_width, self.num_channels))
+                            batch_features[:, :, :, self.num_channels] = \
+                                np.reshape(dnase_features_train[offset:end, :, celltype_idx], (self.batch_size, self.height, self.sequence_width))
+                            batch_labels = np.reshape(y_train[offset:end, celltype_idx], (self.batch_size, 1))
+
+                            feed_dict = {self.features: batch_features,
+                                         self.tf_train_labels: batch_labels,
+                                         self.keep_prob: 1-self.dropout_rate,
+                                         }
+                            _, r_loss = session.run([optimizer, loss], feed_dict=feed_dict)
+                            losses.append(r_loss)
+                    losses = np.array(losses)
+                    t_loss = np.mean(losses)
+
+                    # Validation
+                    accuracies = []
+                    losses = []
+                    num_examples = X_val.shape[0]
+                    prediction_op = tf.nn.sigmoid(self.logits)
+                    for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
+                        end = min(offset+self.batch_size, num_examples)
+                        for celltype_idx in xrange(y.shape[1]):
+                            batch_features[:, :, :, :self.num_channels] = \
+                                np.reshape(X_val[offset:end, :],
+                                           (self.batch_size, self.height, self.sequence_width, self.num_channels))
+                            batch_features[:, :, :, self.num_channels] = \
+                                np.reshape(dnase_features_val[offset:end, :, celltype_idx],
+                                           (self.batch_size, self.height, self.sequence_width))
+                            batch_labels = np.reshape(y_val[offset:end, celltype_idx], (self.batch_size, 1))
+                            feed_dict = {self.features: batch_features,
+                                         self.tf_train_labels: batch_labels,
+                                         self.keep_prob: 1,
+                                         }
+                            prediction, valid_loss = session.run([prediction_op, loss], feed_dict=feed_dict)
+                            accuracies.append(100.0*np.sum(np.abs(prediction-batch_labels) < 0.5)/batch_labels.size)
+                            losses.append(valid_loss)
+                    v_acc = np.mean(np.array(accuracies))
+                    v_loss = np.mean(np.array(losses))
+
+                    early_score = self.early_stopping.update(v_loss)
+                    if early_score == 2:
+                        # Use the best model on validation
+                        saver.save(session, self.model_dir + 'conv%s%s%d%d%d.ckpt'
+                                   % (self.name, self.transcription_factor, self.config,
+                                      self.num_dnase_features, self.sequence_width))
+                        if self.verbose:
+                            print (bcolors.OKCYAN+"%d\t%f\t%f\t%.2f%%\t\t%ds"+bcolors.ENDC) % \
+                                  (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
+                    elif early_score == 1:
+                        if self.verbose:
+                            print "%d\t%f\t%f\t%.2f%%\t\t%ds" % \
+                                  (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
+                    elif early_score == 0:
+                        if self.verbose:
+                            print "Early stopping triggered, exiting..."
+                            break
+
+                    summary_writer.add_graph(session.graph)
+        except KeyboardInterrupt:
+            pass
+
+    def predict_combined(self, X, dnase_features):
+        '''
+                Run trained model
+                :return: predictions
+                '''
+        prediction_op = tf.nn.sigmoid(self.logits)
+        num_examples = X.shape[0]
+        saver = tf.train.Saver(
+            [var for var in tf.get_collection(tf.GraphKeys.VARIABLES) if var.op.name.startswith(self.name)])
+        predictions = []
+        batch_features = np.zeros((self.batch_size, self.height, self.sequence_width, self.num_channels+1))
+        with tf.Session() as session:
+            saver.restore(session, self.model_dir + 'conv%s%s%d%d%d.ckpt'
+                          % (self.name, self.transcription_factor, self.config,
+                             self.num_dnase_features, self.sequence_width))
+            for offset in xrange(0, num_examples, self.batch_size):
+                end = min(offset + self.batch_size, num_examples)
+                offset_ = offset - (self.batch_size - (end - offset))
+
+                batch_features[:, :, :, :self.num_channels] = np.reshape(X[offset_:end, :], (self.batch_size, self.height, self.sequence_width, self.num_channels))
+                batch_features[:, :, :, self.num_channels] = np.reshape(dnase_features[offset_:end, :],
+                                                                         (self.batch_size, self.height,
+                                                                          self.sequence_width))
+                feed_dict = {self.features: batch_features,
+                             self.keep_prob: 1,
+                             }
+                prediction = session.run([prediction_op], feed_dict=feed_dict)
+                prediction = prediction[0][offset - offset_:]
+                predictions.extend(prediction)
+        predictions = np.array(predictions).flatten()
+        return predictions
 
     def get_model(self):
         with tf.variable_scope(self.name) as main_scope:

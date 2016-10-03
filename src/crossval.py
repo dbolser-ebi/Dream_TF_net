@@ -9,7 +9,7 @@ from ensemblr import *
 
 class Evaluator:
 
-    def __init__(self, datapath, bin_size=200, ambiguous_as_bound=False, num_dnase_features=4,
+    def __init__(self, datapath, bin_size=200, num_dnase_features=4,
                  unbound_fraction=1.0, dnase_bin_size=200, chipseq_bin_size=200, debug=False):
         self.num_dnase_features = num_dnase_features
         self.num_train_instances = 51676736
@@ -18,7 +18,6 @@ class Evaluator:
         self.num_train_celltypes = 11
         self.datapath = datapath
         self.bin_size = bin_size
-        self.ambiguous_as_bound = ambiguous_as_bound
         self.unbound_fraction = unbound_fraction
         self.chipseq_bin_size = chipseq_bin_size
         self.dnase_bin_size = dnase_bin_size
@@ -136,7 +135,7 @@ class Evaluator:
             'train',
             transcription_factor,
             celltypes,
-            options=[CrossvalOptions.balance_peaks],
+            options=CrossvalOptions.balance_peaks,
             unbound_fraction=unbound_fraction,
             bin_size=self.bin_size,
             dnase_bin_size=self.dnase_bin_size)
@@ -188,57 +187,73 @@ class Evaluator:
 
                 fin.close()
 
-    def run_cross_cell_benchmark(self, model, transcription_factor,
-                                 save_train_set=True, unbound_fraction=1.0,
-                                 arguments="", save_valid_set=True):
+    def run_cross_cell_benchmark(self, model, transcription_factor, arguments=""):
 
         print "Running cross celltype benchmark for transcription factor %s" % transcription_factor
 
 
         #--------------- TRAIN
         celltypes = self.datagen.get_celltypes_for_tf(transcription_factor)
+        random.shuffle(celltypes)
 
         model.set_transcription_factor(transcription_factor)
 
-        celltypes_train = celltypes[:-1]
-        celltypes_test = celltypes[-1]
-
+        celltypes_train = celltypes[1:]
+        celltypes_test = celltypes[0]
+        '''
         X, dnase_features, y = self.datagen.get_train_data(
                                                             'train',
                                                             transcription_factor,
                                                             celltypes,
-                                                            options=[CrossvalOptions.balance_peaks],
+                                                            options=CrossvalOptions.balance_peaks,
                                                             unbound_fraction=unbound_fraction,
                                                             bin_size=self.bin_size,
                                                             dnase_bin_size=self.dnase_bin_size)
 
-        dnase_features_train = dnase_features[:, :, :-1]
-        dnase_features_valid = dnase_features[:, :, -1]
+        dnase_features = np.log(dnase_features+1)
 
-        y_train = y[:, :-1]
-        y_valid = y[:, -1]
+        dnase_features_train = dnase_features[:, :, 1:]
+        dnase_features_valid = dnase_features[:, :, 0]
+        '''
+        ids = list(self.datagen.generate_position_tree(transcription_factor, celltypes, CrossvalOptions.balance_peaks, self.unbound_fraction))
+        #ids = range(10000)
+        X = self.datagen.get_sequece_from_ids(ids, 'train', self.bin_size)
+        dnase_features = np.zeros((len(ids), self.bin_size, len(celltypes)), dtype=np.float32)
+        y = np.zeros((len(ids), len(celltypes)), dtype=np.float32)
 
+        trans_f_lookup = self.datagen.get_trans_f_lookup()
 
-        model.fit(X, y_train, None,
-                  None, dnase_features_train)
+        for c_idx, celltype in enumerate(celltypes):
+            dnase_features[:, :, c_idx] = self.datagen.get_dnase_features_from_ids(ids, 'train', celltype, self.bin_size)
+            y[:, c_idx] = \
+                np.load('../data/preprocess/features/y_%s.npy' % celltype)[ids, trans_f_lookup[transcription_factor]]
 
-        predictions = model.predict(X, None, None, dnase_features_valid)
+        y_train = y[:, 1:]
+        y_val = y[:, 0]
+        dnase_features_train = dnase_features[:, :, 1:]
+        dnase_features_val = dnase_features[:, :, 0]
+
+        #model.fit(X, y_train, None,
+        #          None, dnase_features_train)
+        model.fit_combined(X, dnase_features_train, y_train)
+        predictions = model.predict_combined(X, dnase_features_val)
+
+        #predictions = model.predict(X, None, None, dnase_features_valid)
 
         print 'TRAINING COMPLETED'
-        self.print_results(y_valid, predictions.astype(np.float16))
+        self.print_results(y_val, predictions.astype(np.float16))
 
         # --------------- VALIDATION
         print
         print "RUNNING TESTS"
 
         ids = range(2702470) #chr10
-        X = self.datagen.get_sequece_from_ids(ids, 'train')
-        dnase_features = np.load('../data/preprocess/DNASE_FEATURES_NORM/%s_%s_%d.gz.npy'
-                                         % (celltypes_test, 'train', self.dnase_bin_size))[ids]
+        X = self.datagen.get_sequece_from_ids(ids, 'train', self.bin_size)
+        dnase_features = self.datagen.get_dnase_features_from_ids(ids, 'train', celltypes_test, dnase_bin_size=self.bin_size)
 
         trans_f_lookup = self.datagen.get_trans_f_lookup()
         y_test = np.load('../data/preprocess/features/y_%s.npy' % celltypes_test)[ids, trans_f_lookup[transcription_factor]]
-        y_pred = model.predict(X, None, None, dnase_features)
+        y_pred = model.predict_combined(X, dnase_features)#model.predict(X, None, None, dnase_features)
         self.print_results(y_test, y_pred)
 
 
@@ -246,7 +261,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--transcription_factors', '-tfs', help='Comma separated list of transcription factors', required=True)
     parser.add_argument('--model', '-m', help='Choose model [TFC/RENS]', required=True)
-    parser.add_argument('--save_validset', '-sv', help="save validation set", action='store_true', required=False)
     parser.add_argument('--regression', '-reg', help='Use the chipseq signal strength as targets', action='store_true',
                         required=False)
     parser.add_argument('--validate', '-v', action='store_true', help='run cross TF validation benchmark', required=False)
@@ -257,7 +271,6 @@ if __name__ == '__main__':
     parser.add_argument('--config', '-c', help='configuration of model', required=False)
     parser.add_argument('--unbound_fraction', '-uf', help='unbound fraction in training', required=False)
     parser.add_argument('--num_epochs', '-ne', help='number of epochs', required=False)
-    parser.add_argument('--ambiguous_bound', '-ab', action='store_true', help='treat ambiguous as bound', required=False)
     parser.add_argument('--bin_size', '-bs', help='Sequence bin size (must be an even number >= 200)', required=False)
     parser.add_argument('--dnase_bin_size', '-dbs', help='DNASE bin size', required=False)
     parser.add_argument('--chipseq_bin_size', '-cbs', help='CHIPSEQ bin size', required=False)
@@ -339,16 +352,13 @@ if __name__ == '__main__':
 
     if model is not None:
         transcription_factors = args.transcription_factors.split(',')
-        evaluator = Evaluator('../data/', bin_size=bin_size,
-                              ambiguous_as_bound=args.ambiguous_bound, num_dnase_features=num_dnase_features,
+        evaluator = Evaluator('../data/', bin_size=bin_size, num_dnase_features=num_dnase_features,
                               unbound_fraction=unbound_fraction, dnase_bin_size=dnase_bin_size,
                               chipseq_bin_size=chipseq_bin_size, debug=args.debug)
         for transcription_factor in transcription_factors:
             if args.validate:
-                evaluator.run_cross_cell_benchmark(model, transcription_factor, save_train_set=True,
-                                                   unbound_fraction=unbound_fraction,
-                                                   arguments=str(vars(args)).replace('\'', ''),
-                                                   save_valid_set=args.save_validset)
+                evaluator.run_cross_cell_benchmark(model, transcription_factor,
+                                                   arguments=str(vars(args)).replace('\'', ''))
             if args.ladder:
                 evaluator.make_ladder_predictions(model, transcription_factor, unbound_fraction=unbound_fraction, leaderboard=True)
 
