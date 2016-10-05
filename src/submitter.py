@@ -9,7 +9,8 @@ def submit(folder, id, password):
     syn = synapseclient.Synapse()
     syn.login(email=id, password=password)
 
-    project = syn.get(7118431)
+    project = syn.get(7118431) # Nabla
+    #project = syn.get(7341111)  # Stackd
 
     submission_filenames = [fname for fname in os.listdir(folder)]
 
@@ -24,6 +25,7 @@ def submit(folder, id, password):
             f_handler = synapseclient.File(filename, parent=project)
             entity = syn.store(f_handler)
             syn.submit(evaluation, entity, name='test', team='Nabla')
+            # syn.submit(evaluation, entity, name='test') #Stackd
 
 
 if __name__ == '__main__':

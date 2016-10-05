@@ -99,6 +99,24 @@ class DataGenerator:
         celltypes = list(set(celltypes))
         return celltypes
 
+    def get_trans_fs_for_celltype_train(self, celltype):
+        '''
+        Returns the list of transcription factors for that particular celltype
+        :param datapath: Path to the label directory
+        :param celltype: celltype to Crossval
+        :return:
+        '''
+        files = [f for f in os.listdir(self.label_path)]
+        tfs = []
+        for f in files:
+            fpath = os.path.join(self.label_path, f)
+            with gzip.open(fpath) as fin:
+                header = fin.readline()
+                if celltype in header:
+                    tf = f.split('.')[0]
+                    tfs.append(tf)
+        return list(set(tfs))
+
     def sequence_to_one_hot(self, sequence):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -192,6 +210,12 @@ class DataGenerator:
 
     def get_dnase_features_from_ids(self, ids, segment, celltype, dnase_bin_size=600):
         return np.load(os.path.join(self.save_dir, 'dnase_fold_%s_%s_%d.npy' % (segment, celltype, dnase_bin_size)))[ids]
+
+    def get_dnase_features(self, segment, celltype, dnase_bin_size=600):
+        return np.load(os.path.join(self.save_dir, 'dnase_fold_%s_%s_%d.npy' % (segment, celltype, dnase_bin_size)))
+
+    def get_y(self, celltype):
+        return np.load('../data/preprocess/features/y_%s.npy' % celltype)
 
     def get_bound_positions(self):
         save_path = os.path.join(self.save_dir, 'bound_positions.npy')

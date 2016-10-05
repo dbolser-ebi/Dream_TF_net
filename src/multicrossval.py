@@ -5,14 +5,14 @@ import argparse
 
 
 class Evaluator:
-    def __init__(self, mode, epochs=None, celltypes=None, batch_size=None):
+    def __init__(self, epochs=None, celltypes=None, batch_size=None, id =None):
 
         self.datagen = DataGenerator()
         self.model = MultiConvNet('../log/', batch_size=512 if batch_size is None else batch_size, num_epochs=1 if epochs is None else epochs,
-                                  sequence_width=600, num_outputs=self.datagen.num_trans_fs,
+                                  sequence_width=200, num_outputs=self.datagen.num_trans_fs,
                              eval_size=.2, early_stopping=10, num_dnase_features=63, dropout_rate=.25,
-                             config=1, verbose=True, name='multiconvnet_'+str(mode)+str(epochs)+str(celltypes)+str(batch_size), segment='train', learning_rate=0.001)
-        self.mode = mode
+                             config=1, verbose=True, segment='train', learning_rate=0.001,
+                                  id=id)
         self.celltypes = celltypes
 
     def print_results_tf(self, trans_f, y_test, y_pred):
@@ -22,11 +22,8 @@ class Evaluator:
         print "Results for transcription factor", trans_f
         print 'AU ROC', auroc(y_test.flatten(), y_pred.flatten())
         print 'AU PRC', auprc(y_test.flatten(), y_pred.flatten())
-        print 'RECALL AT FDR 0.9', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.90)
         print 'RECALL AT FDR 0.5', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.50)
-        print 'RECALL AT FDR 0.25', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.25)
         print 'RECALL AT FDR 0.1', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.10)
-        print 'RECALL AT FDR 0.05', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.05)
 
     def make_predictions(self):
 
@@ -109,10 +106,7 @@ class Evaluator:
         held_out_celltypes = ['MCF-7', 'SK-N-SH', 'PC-3', 'liver', 'induced_pluripotent_stem_cell']
         test_celltypes = ['MCF-7', 'SK-N-SH']
         # Training
-        if self.mode == 'FA':
-            celltypes = self.datagen.get_celltypes()
-        elif self.mode == 'FTF':
-            celltypes = self.datagen.get_celltypes_for_trans_f('CTCF')
+        celltypes = self.datagen.get_celltypes()
 
         if self.celltypes.strip().upper() == 'One'.upper():
             print "running on one celltype"
@@ -124,30 +118,25 @@ class Evaluator:
             except:
                 continue
 
-        if self.mode == 'FA':
-            self.model.fit_all(celltypes)
-        elif self.mode == 'FTF':
-            self.model.fit_tf(celltypes)
+        self.model.fit(celltypes)
 
         # Validation
         for celltype in test_celltypes:
             print "Running benchmark for celltype", celltype
             y_test = np.load(os.path.join(self.datagen.save_dir, 'y_%s.npy' % celltype))
-            y_pred = self.model.predict(celltype)
+            y_pred = self.model.predict(celltype, True)
             for trans_f in self.datagen.get_trans_fs():
                 if celltype not in self.datagen.get_celltypes_for_trans_f(trans_f):
                     continue
-                self.print_results_tf(trans_f, y_test, y_pred)
+                self.print_results_tf(trans_f, y_test[:2702470], y_pred)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', help='FA/FTF', required=True)
     parser.add_argument('--num_epochs', '-ne', help='Number of epochs', required=False, type=int)
     parser.add_argument('--celltypes', '-ct', help='All/One', required=False)
     parser.add_argument('--seperate_cost', '-sc', action='store_true', help='Seperate cost for bound and unbound', required=False)
-    parser.add_argument('--deep_wide', '-dw', action='store_true', help='Use a deeper and wider architecture', required=False)
     parser.add_argument('--batch_size', '-batch', help='Batch size', required=False, type=int)
     args = parser.parse_args()
-    evaluator = Evaluator(args.mode, args.num_epochs, args.celltypes, args.batch_size)
+    evaluator = Evaluator(args.num_epochs, args.celltypes, args.batch_size, re.sub('[^0-9a-zA-Z]+', "", str(vars(args))))
     evaluator.run_benchmark()

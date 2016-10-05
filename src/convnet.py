@@ -33,25 +33,6 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 
-def weight_variable(shape):
-    initial = tf.truncated_normal(shape, stddev=0.1)
-    return tf.Variable(initial)
-
-
-def bias_variable(shape):
-    initial = tf.constant(0.1, shape=shape)
-    return tf.Variable(initial)
-
-
-def conv1D(x, W, strides=[1, 1, 1, 1]):
-    return tf.nn.conv2d(x, W, strides=strides, padding='VALID')
-
-
-def max_pool_1xn(x, width):
-    return tf.nn.max_pool(x, ksize=[1, 1, width, 1],
-                          strides=[1, 1, width, 1], padding='VALID')
-
-
 def calc_loss(logits, labels):
     entropies = tf.nn.sigmoid_cross_entropy_with_logits(logits, labels)
     return tf.reduce_mean(entropies)
@@ -84,10 +65,12 @@ class ConvNet:
     def __init__(self, model_dir, batch_size=256, num_channels=4, num_epochs=2,
                  sequence_width=200, num_outputs=1, eval_size=0.2, early_stopping=100,
                  num_gen_expr_features=57820, num_dnase_features=4, num_shape_features=4, dropout_rate=.5,
-                 config=1, verbose=True, transcription_factor='CTCF', regression=False,
-                 name='convnet'):
+                 config=1, verbose=True, transcription_factor='RFX5', regression=False,
+                 name='convnet', num_chunks=10, id='ID'):
         if config is None:
             config = 1
+        self.id = id
+        self.num_chunks = min(num_chunks, 52)
         self.name = name
         self.regression = regression
         self.datagen = DataGenerator()
@@ -100,7 +83,7 @@ class ConvNet:
         self.batch_size = batch_size
         self.model_dir = model_dir
         self.num_epochs = num_epochs
-        self.sequence_width = sequence_width
+        self.bin_size = sequence_width
         self.eval_size = eval_size
         self.verbose = verbose
         self.num_genexpr_features = num_gen_expr_features
@@ -115,7 +98,7 @@ class ConvNet:
         self.early_stopping = EarlyStopping(max_stalls=early_stopping)
         self.dropout_rate = dropout_rate
         self.transcription_factor = transcription_factor
-        self.features = tf.placeholder(tf.float32, shape=(batch_size, self.height, sequence_width, self.num_channels+1))
+        self.tf_features = tf.placeholder(tf.float32, shape=(batch_size, self.height, sequence_width, self.num_channels+1))
         self.logits = self.get_combined_model()
 
     def set_transcription_factor(self, transcription_factor):
@@ -127,11 +110,11 @@ class ConvNet:
                 with tf.variable_scope('conv15_15') as convscope:
                     kernel_width = 15
                     num_filters = 100
-                    activation = convolution2d(self.features, num_filters, [self.height, kernel_width])
+                    activation = convolution2d(self.tf_features, num_filters, [self.height, kernel_width])
 
                 with tf.variable_scope('pool35') as poolscope:
                     pool_width = 35
-                    pool = tf.nn.relu(max_pool_1xn(activation, pool_width))
+                    pool = tf.nn.relu(max_pool2d(activation, (self.height, pool_width), stride=pool_width))
 
                 with tf.variable_scope('fc100') as fcscope:
                     flattened = flatten(pool)
@@ -143,7 +126,7 @@ class ConvNet:
 
         return logits
 
-    def fit_combined(self, X, dnase_features, y):
+    def fit_combined(self, celltypes_train):
         summary_writer = tf.train.SummaryWriter(self.model_dir + 'train')
         try:
             with tf.variable_scope(self.name+'_opt') as scope:
@@ -152,24 +135,6 @@ class ConvNet:
 
             saver = tf.train.Saver([var for var in tf.get_collection(tf.GraphKeys.VARIABLES) if var.op.name.startswith(self.name)])
 
-            if self.regression:
-                kf = KFold(y.size, round(1. / self.eval_size))
-            else:
-                y_ = np.max(y, axis=1)
-                kf = StratifiedKFold(y_, round(1. / self.eval_size))
-            train_indices, valid_indices = next(iter(kf))
-
-            X_train = X[train_indices]
-            X_val = X[valid_indices]
-
-            dnase_features_train = dnase_features[train_indices]
-            dnase_features_val = dnase_features[valid_indices]
-
-            y_train = y[train_indices]
-            y_val = y[valid_indices]
-
-            print 'Train size', X_train.shape[0], 'Validation size', X_val.shape[0]
-
             with tf.Session() as session:
                 tf.initialize_all_variables().run()
 
@@ -177,76 +142,76 @@ class ConvNet:
                     print
                     print "EPOCH\tTRAIN LOSS\tVALID LOSS\tVALID ACCURACY\tTIME"
 
-                batch_features = np.zeros((self.batch_size, self.height, self.sequence_width, self.num_channels+1))
+                batch_features = np.zeros((self.batch_size, self.height, self.bin_size, self.num_channels+1))
 
                 # Training
+
+                trans_f_idx = self.datagen.get_trans_f_lookup()[self.transcription_factor]
+
                 for epoch in xrange(1, self.num_epochs+1):
+                    train_losses = []
                     start_time = time.time()
-                    num_examples = X_train.shape[0]
-                    losses = []
 
-                    shuffle_idxs = np.arange(X_train.shape[0])
-                    np.random.shuffle(shuffle_idxs)
-                    X_train = X_train[shuffle_idxs]
-                    y_train = y_train[shuffle_idxs]
-                    dnase_features_train = dnase_features_train[shuffle_idxs]
+                    for c_idx, celltype in enumerate(celltypes_train):
+                        y = self.datagen.get_y(celltype)
+                        dnase_features = self.datagen.get_dnase_features('train', celltype, self.bin_size)
+                        print 'Data for celltype', celltype, 'loaded.'
 
-                    for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
-                        end = min(offset+self.batch_size, num_examples)
-                        for celltype_idx in xrange(y.shape[1]):
-                            batch_features[:, :, :, :self.num_channels] = \
-                                np.reshape(X_train[offset:end, :], (self.batch_size, self.height, self.sequence_width, self.num_channels))
-                            batch_features[:, :, :, self.num_channels] = \
-                                np.reshape(dnase_features_train[offset:end, :, celltype_idx], (self.batch_size, self.height, self.sequence_width))
-                            batch_labels = np.reshape(y_train[offset:end, celltype_idx], (self.batch_size, 1))
+                        for chunk_id in range(1, self.num_chunks+1):
+                            ids = range((chunk_id - 1) * 1000000, min(chunk_id * 1000000, self.datagen.train_length))
 
-                            feed_dict = {self.features: batch_features,
-                                         self.tf_train_labels: batch_labels,
-                                         self.keep_prob: 1-self.dropout_rate,
-                                         }
-                            _, r_loss = session.run([optimizer, loss], feed_dict=feed_dict)
-                            losses.append(r_loss)
-                    losses = np.array(losses)
-                    t_loss = np.mean(losses)
+                            X = self.datagen.get_sequece_from_ids(ids, 'train', self.bin_size)
+                            num_examples = X.shape[0]
+                            y_chunk = y[ids]
+                            dnase_chunk = dnase_features[ids]
 
-                    # Validation
-                    accuracies = []
-                    losses = []
-                    num_examples = X_val.shape[0]
-                    prediction_op = tf.nn.sigmoid(self.logits)
-                    for offset in xrange(0, num_examples-self.batch_size, self.batch_size):
-                        end = min(offset+self.batch_size, num_examples)
-                        for celltype_idx in xrange(y.shape[1]):
-                            batch_features[:, :, :, :self.num_channels] = \
-                                np.reshape(X_val[offset:end, :],
-                                           (self.batch_size, self.height, self.sequence_width, self.num_channels))
-                            batch_features[:, :, :, self.num_channels] = \
-                                np.reshape(dnase_features_val[offset:end, :, celltype_idx],
-                                           (self.batch_size, self.height, self.sequence_width))
-                            batch_labels = np.reshape(y_val[offset:end, celltype_idx], (self.batch_size, 1))
-                            feed_dict = {self.features: batch_features,
-                                         self.tf_train_labels: batch_labels,
-                                         self.keep_prob: 1,
-                                         }
-                            prediction, valid_loss = session.run([prediction_op, loss], feed_dict=feed_dict)
-                            accuracies.append(100.0*np.sum(np.abs(prediction-batch_labels) < 0.5)/batch_labels.size)
-                            losses.append(valid_loss)
-                    v_acc = np.mean(np.array(accuracies))
-                    v_loss = np.mean(np.array(losses))
+                            print "Loaded %d examples for batch %d" % (X.shape[0], chunk_id)
 
-                    early_score = self.early_stopping.update(v_loss)
+                            batch_train_losses = []
+                            for offset in xrange(0, num_examples - self.batch_size, self.batch_size):
+                                end = offset + self.batch_size
+                                batch_sequence = np.reshape(X[offset:end, :, :],
+                                                            (self.batch_size, self.height, self.bin_size,
+                                                             self.num_channels))
+                                batch_features[:, :, :, :self.num_channels] = batch_sequence
+
+                                if self.config == 1:
+                                    batch_features[:, :, :, self.num_channels] = \
+                                        np.zeros((self.batch_size, self.height, self.bin_size), dtype=np.float32)
+                                else:
+                                    batch_features[:, :, :, self.num_channels] = \
+                                        np.reshape(dnase_chunk[offset:end, :],
+                                                   (self.batch_size, self.height, self.bin_size))
+                                batch_labels = np.reshape(y_chunk[offset:end, trans_f_idx], (self.batch_size, self.num_outputs))
+                                feed_dict = {self.tf_sequence: batch_sequence,
+                                             self.tf_features: batch_features,
+                                             self.tf_train_labels: batch_labels,
+                                             self.keep_prob: 1 - self.dropout_rate,
+                                             }
+
+                                _, r_loss = \
+                                    session.run([optimizer, loss], feed_dict=feed_dict)
+
+                                batch_train_losses.append(r_loss)
+
+                            print "Batch loss", np.mean(np.array(batch_train_losses))
+                            train_losses.extend(batch_train_losses)
+
+                    train_losses = np.array(train_losses)
+                    t_loss = np.mean(train_losses)
+
+                    early_score = self.early_stopping.update(t_loss)
                     if early_score == 2:
                         # Use the best model on validation
-                        saver.save(session, self.model_dir + 'conv%s%s%d%d%d.ckpt'
-                                   % (self.name, self.transcription_factor, self.config,
-                                      self.num_dnase_features, self.sequence_width))
+                        saver.save(session, self.model_dir + 'conv%s.ckpt'
+                                   % self.id)
                         if self.verbose:
-                            print (bcolors.OKCYAN+"%d\t%f\t%f\t%.2f%%\t\t%ds"+bcolors.ENDC) % \
-                                  (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
+                            print (bcolors.OKCYAN + "%d\t%f\t%f\t\t%ds" + bcolors.ENDC) % \
+                                  (epoch, float(t_loss), float(t_loss), int(time.time() - start_time))
                     elif early_score == 1:
                         if self.verbose:
-                            print "%d\t%f\t%f\t%.2f%%\t\t%ds" % \
-                                  (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
+                            print "%d\t%f\t%f\t\t%ds" % \
+                                  (epoch, float(t_loss), float(t_loss), int(time.time() - start_time))
                     elif early_score == 0:
                         if self.verbose:
                             print "Early stopping triggered, exiting..."
@@ -266,20 +231,24 @@ class ConvNet:
         saver = tf.train.Saver(
             [var for var in tf.get_collection(tf.GraphKeys.VARIABLES) if var.op.name.startswith(self.name)])
         predictions = []
-        batch_features = np.zeros((self.batch_size, self.height, self.sequence_width, self.num_channels+1))
+        batch_features = np.zeros((self.batch_size, self.height, self.bin_size, self.num_channels+1))
         with tf.Session() as session:
-            saver.restore(session, self.model_dir + 'conv%s%s%d%d%d.ckpt'
-                          % (self.name, self.transcription_factor, self.config,
-                             self.num_dnase_features, self.sequence_width))
+            saver.restore(session, self.model_dir + 'conv%s.ckpt'
+                                   % self.id)
             for offset in xrange(0, num_examples, self.batch_size):
                 end = min(offset + self.batch_size, num_examples)
                 offset_ = offset - (self.batch_size - (end - offset))
 
-                batch_features[:, :, :, :self.num_channels] = np.reshape(X[offset_:end, :], (self.batch_size, self.height, self.sequence_width, self.num_channels))
-                batch_features[:, :, :, self.num_channels] = np.reshape(dnase_features[offset_:end, :],
-                                                                         (self.batch_size, self.height,
-                                                                          self.sequence_width))
-                feed_dict = {self.features: batch_features,
+                batch_features[:, :, :, :self.num_channels] = \
+                    np.reshape(X[offset_:end, :], (self.batch_size, self.height, self.bin_size, self.num_channels))
+                if self.config == 1:
+                    batch_features[:, :, :, self.num_channels] = \
+                        np.zeros((self.batch_size, self.height, self.bin_size), dtype=np.float32)
+                else:
+                    batch_features[:, :, :, self.num_channels] = \
+                        np.reshape(dnase_features[offset_:end, :], (self.batch_size, self.height,
+                                                                    self.bin_size))
+                feed_dict = {self.tf_features: batch_features,
                              self.keep_prob: 1,
                              }
                 prediction = session.run([prediction_op], feed_dict=feed_dict)
@@ -311,7 +280,7 @@ class ConvNet:
                                 conv_biases = tf.zeros(shape=[depth])
                                 stride = 1
                                 conv = conv1D(self.tf_sequence, usual_conv_kernel, strides=[1, 1, stride, 1])
-                                num_nodes = (self.sequence_width - filter_width) / stride + 1
+                                num_nodes = (self.bin_size - filter_width) / stride + 1
                                 denominator = 4
                                 for div in range(4, 10):
                                     if num_nodes % div == 0:
@@ -456,9 +425,9 @@ class ConvNet:
                         end = min(offset+self.batch_size, num_examples)
                         for celltype_idx in xrange(y.shape[1]):
 
-                            batch_sequence = np.reshape(X_train[offset:end, :], (self.batch_size, self.height, self.sequence_width, self.num_channels))
+                            batch_sequence = np.reshape(X_train[offset:end, :], (self.batch_size, self.height, self.bin_size, self.num_channels))
                             #batch_shapes = np.reshape(S_train[offset:end, :],
-                            #                          (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
+                            #                          (self.batch_size, self.height, self.bin_size, self.num_shape_features))
                             batch_labels = np.reshape(y_train[offset:end, celltype_idx], (self.batch_size, 1))
                             batch_dnase_features = np.reshape(da_train[offset:end, :self.num_dnase_features, celltype_idx],
                                                               (self.batch_size, self.num_dnase_features))
@@ -488,9 +457,9 @@ class ConvNet:
                         end = min(offset+self.batch_size, num_examples)
                         for celltype_idx in xrange(y.shape[1]):
                             batch_sequence = np.reshape(X_val[offset:end, :],
-                                                        (self.batch_size, self.height, self.sequence_width, self.num_channels))
+                                                        (self.batch_size, self.height, self.bin_size, self.num_channels))
                             #batch_shapes = np.reshape(S_val[offset:end, :],
-                            #                          (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
+                            #                          (self.batch_size, self.height, self.bin_size, self.num_shape_features))
                             batch_labels = np.reshape(y_val[offset:end, celltype_idx], (self.batch_size, 1))
                             batch_dnase_features = np.reshape(da_val[offset:end, :self.num_dnase_features, celltype_idx],
                                                               (self.batch_size, self.num_dnase_features))
@@ -514,7 +483,7 @@ class ConvNet:
                         # Use the best model on validation
                         saver.save(session, self.model_dir + 'conv%s%s%d%d%d.ckpt'
                                    % (self.name, self.transcription_factor, self.config,
-                                      self.num_dnase_features, self.sequence_width))
+                                      self.num_dnase_features, self.bin_size))
                         if self.verbose:
                             print (bcolors.OKCYAN+"%d\t%f\t%f\t%.2f%%\t\t%ds"+bcolors.ENDC) % \
                                   (epoch, float(t_loss), float(v_loss), float(v_acc), int(time.time() - start_time))
@@ -547,15 +516,15 @@ class ConvNet:
         with tf.Session() as session:
             saver.restore(session, self.model_dir+'conv%s%s%d%d%d.ckpt'
                           % (self.name, self.transcription_factor, self.config,
-                             self.num_dnase_features, self.sequence_width))
+                             self.num_dnase_features, self.bin_size))
             for offset in xrange(0, num_examples, self.batch_size):
 
                 end = min(offset + self.batch_size, num_examples)
                 offset_ = offset - (self.batch_size-(end-offset))
                 batch_sequence = np.reshape(X[offset_:end, :],
-                                            (self.batch_size, self.height, self.sequence_width, self.num_channels))
+                                            (self.batch_size, self.height, self.bin_size, self.num_channels))
                 #batch_shapes = np.reshape(S[offset_:end, :],
-                #                          (self.batch_size, self.height, self.sequence_width, self.num_shape_features))
+                #                          (self.batch_size, self.height, self.bin_size, self.num_shape_features))
                 batch_da_features = np.reshape(da[offset_:end, :self.num_dnase_features],
                                                (self.batch_size, self.num_dnase_features))
                 feed_dict = {self.tf_sequence: batch_sequence,
@@ -581,7 +550,7 @@ class XGBoost:
         self.tf_sequence = tf.placeholder(tf.float32, shape=(batch_size, self.height,
                                           sequence_width, self.num_channels), name='sequences')
         self.batch_size = batch_size
-        self.sequence_width = sequence_width
+        self.bin_size = sequence_width
         self.datagen = DataGenerator()
         self.config = config
         self.transcription_factor = transcription_factor
@@ -600,19 +569,19 @@ class XGBoost:
                 batch_activations = sess.run(self.activations, feed_dict={self.tf_sequence:
                                                                               X[self.batch_size*i:
                                                                               self.batch_size*i+self.batch_size].
-                                             reshape(self.batch_size, self.height, self.sequence_width,
+                                             reshape(self.batch_size, self.height, self.bin_size,
                                                      self.num_channels)}
                                              )
                 batch_activations = np.concatenate(batch_activations, axis=1)
                 activations.append(batch_activations)
             if offset != 0:
-                zero_array = np.zeros([self.batch_size - offset, self.sequence_width, self.num_channels])
+                zero_array = np.zeros([self.batch_size - offset, self.bin_size, self.num_channels])
                 final_chunk = np.concatenate([X[self.batch_size*(i+1):], zero_array])
                 batch_activations = sess.run(self.activations,
                                              feed_dict={self.tf_sequence:final_chunk.reshape(
                                                  self.batch_size,
                                                  self.height,
-                                                 self.sequence_width,
+                                                 self.bin_size,
                                                  self.num_channels)})
                 batch_activations = np.concatenate(batch_activations, axis=1)
                 activations.append(batch_activations)
@@ -653,17 +622,17 @@ class XGBoost:
                                                      X[self.batch_size*i:
                                                        self.batch_size*i+self.batch_size].reshape(
                                                        self.batch_size, self.height,
-                                                       self.sequence_width, self.num_channels)}
+                                                       self.bin_size, self.num_channels)}
                                              )
                 batch_activations = np.concatenate(batch_activations, axis=1)
                 activations.append(batch_activations)
             if offset != 0:
-                zero_array = np.zeros([self.batch_size - offset, self.sequence_width, self.num_channels])
+                zero_array = np.zeros([self.batch_size - offset, self.bin_size, self.num_channels])
                 final_chunk = np.concatenate([X[self.batch_size*(i+1):], zero_array])
                 batch_activations = sess.run(self.activations,
                                              feed_dict={self.tf_sequence:final_chunk.reshape(self.batch_size,
                                                                                              self.height,
-                                                                                             self.sequence_width,
+                                                                                             self.bin_size,
                                                                                              self.num_channels)})
                 batch_activations = np.concatenate(batch_activations, axis=1)
                 activations.append(batch_activations)
@@ -697,7 +666,7 @@ class XGBoost:
                             conv_biases = tf.zeros(shape=[depth])
                             stride = 1
                             conv = conv1D(self.tf_sequence, usual_conv_kernel, strides=[1, 1, stride, 1])
-                            num_nodes = (self.sequence_width - filter_width) / stride + 1
+                            num_nodes = (self.bin_size - filter_width) / stride + 1
                             denominator = 4
                             for div in range(4, 10):
                                 if num_nodes % div == 0:
