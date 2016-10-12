@@ -54,13 +54,14 @@ class MultiConvNet:
                  sequence_width=200, num_outputs=1, eval_size=0.2, early_stopping=100,
                 num_dnase_features=4, dropout_rate=.5,
                  config=1, verbose=True, name='convnet', segment='train', learning_rate=0.001, seperate_cost=False,
-                 debug=False, id="ID"):
+                 debug=False, id="ID", num_chunks=10):
         if config is None:
             config = 1
         self.id = id
         self.debug = debug
         self.seperate_cost = seperate_cost
         self.learning_rate = learning_rate
+        self.num_chunks = num_chunks
         self.segment = segment
         self.name = name
         self.config = config
@@ -83,6 +84,7 @@ class MultiConvNet:
         self.trans_f_index = tf.placeholder(tf.int32, name='tf_index')
         self.early_stopping = EarlyStopping(max_stalls=early_stopping)
         self.dropout_rate = dropout_rate
+        self.tf_ratio = tf.placeholder(tf.float32, name='ratio_bound_unbound')
         self.logits = self.get_model()
         self.datagen = DataGenerator()
 
@@ -91,41 +93,23 @@ class MultiConvNet:
 
     def get_model(self):
         with tf.variable_scope(self.name) as main_scope:
+            with tf.variable_scope('R_MOTIF') as scope:
+                with tf.variable_scope('conv1') as convscope:
+                    kernel_width = 16
+                    num_filters = 10
+                    conv1 = convolution2d(self.tf_features, num_filters, [self.height, kernel_width], activation_fn=None)
 
-            with tf.variable_scope('conv1') as convscope:
-                kernel_width = 8
-                num_filters = 320
-                conv1 = convolution2d(self.tf_features, num_filters, [self.height, kernel_width], padding='VALID')
+                with tf.variable_scope('pool') as poolscope:
+                    pool_width = 35
+                    pool = tf.nn.relu(max_pool2d(conv1, (self.height, pool_width), stride=pool_width))
 
-            with tf.variable_scope('pool1') as poolscope:
-                pool_width = 4
-                pool1 = tf.nn.relu(max_pool2d(conv1, [self.height, pool_width], padding='SAME', stride=4))
+                with tf.variable_scope('fc100') as fcscope:
+                    flattened = flatten(pool)
+                    drop_rmotif = fully_connected(flattened, 100)
+                    drop_rmotif = tf.nn.dropout(drop_rmotif, self.keep_prob)
 
-            with tf.variable_scope('conv2') as convscope:
-                kernel_width = 8
-                num_filters = 320
-                conv2 = convolution2d(pool1, num_filters, [self.height, kernel_width], padding='VALID')
-
-            with tf.variable_scope('pool2') as poolscope:
-                pool_width = 4
-                pool2 = tf.nn.relu(max_pool2d(conv2, [self.height, pool_width], padding='SAME', stride=4))
-
-            with tf.variable_scope('conv3') as convscope:
-                kernel_width = 8
-                num_filters = 480
-                conv3 = convolution2d(pool2, num_filters, [self.height, kernel_width], padding='VALID')
-
-            with tf.variable_scope('pool3') as poolscope:
-                pool_width = 4
-                pool3 = tf.nn.relu(max_pool2d(conv3, [self.height, pool_width], padding='SAME', stride=4))
-
-            with tf.variable_scope('fc') as fcscope:
-                fc1 = fully_connected(flatten(pool3), 1000)
-
-            with tf.variable_scope('output') as outscope:
-                logits = fully_connected(fc1, self.num_outputs, None)
-                logits = tf.nn.dropout(logits, self.keep_prob)
-
+                with tf.variable_scope('output') as outscope:
+                    logits = fully_connected(drop_rmotif, self.num_outputs, None)
         return logits
 
     def get_loss(self, labels, logits):
@@ -137,6 +121,24 @@ class MultiConvNet:
         entropies = tf.nn.sigmoid_cross_entropy_with_logits(logits_known, labels_known)
         return tf.reduce_mean(entropies)
 
+    def calc_loss_seperate(self, logits, labels, ratio):
+        logits = tf.reshape(logits, [-1])
+        labels = tf.reshape(labels, [-1])
+        index = tf.where(tf.not_equal(labels, tf.constant(-1, dtype=tf.float32)))
+        logits = tf.gather(logits, index)
+        labels = tf.gather(labels, index)
+        entropies = tf.nn.sigmoid_cross_entropy_with_logits(logits, labels)
+
+        labels_complement = tf.constant(1.0, dtype=tf.float32) - labels
+        entropy_bound = tf.reduce_sum(tf.mul(labels, entropies))
+        entropy_unbound = tf.reduce_sum(tf.mul(labels_complement, entropies))
+        num_bound = tf.reduce_sum(labels)
+        num_unbound = tf.reduce_sum(labels_complement)
+        loss_bound = tf.mul(ratio, tf.cond(tf.equal(num_bound, tf.constant(0.0)), lambda: tf.constant(0.0),
+                                           lambda: tf.div(entropy_bound, num_unbound)))
+        loss_unbound = tf.div(entropy_unbound, num_unbound)
+        return tf.add(loss_bound, loss_unbound)
+
     def get_debug(self, labels, logits):
         predictions = tf.nn.sigmoid(logits)
         return labels, logits, predictions
@@ -145,7 +147,7 @@ class MultiConvNet:
         summary_writer = tf.train.SummaryWriter(self.model_dir + self.segment)
         try:
             with tf.variable_scope(self.name + '_opt') as scope:
-                loss = self.get_loss(self.tf_train_labels, self.logits)
+                loss = self.calc_loss_seperate(self.logits, self.tf_train_labels, self.tf_ratio)#self.get_loss(self.tf_train_labels, self.logits)
                 optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=0.9,
                                                    beta2=0.999).minimize(loss)
 
@@ -164,7 +166,7 @@ class MultiConvNet:
                     train_losses = []
                     start_time = time.time()
                     batch_features = np.zeros((self.batch_size, self.height, self.bin_size, self.num_channels+1), dtype=np.float32)
-                    for chunk_id in range(1, 52):
+                    for chunk_id in range(1, self.num_chunks+1):
                         ids = range((chunk_id - 1) * 1000000, min(chunk_id * 1000000, self.datagen.train_length))
                         X = self.datagen.get_sequece_from_ids(ids, self.segment, self.bin_size)
                         num_examples = X.shape[0]
@@ -195,6 +197,7 @@ class MultiConvNet:
                                              self.tf_features: batch_features,
                                              self.tf_train_labels: batch_labels,
                                              self.keep_prob: 1 - self.dropout_rate,
+                                             self.tf_ratio: 100,
                                              }
 
                                 _, r_loss = \

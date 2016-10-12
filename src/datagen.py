@@ -11,6 +11,8 @@ import random
 from enum import Enum
 from wiggleReader import *
 from multiprocessing import Process
+from pyDNAbinding.binding_model import DNASequence, PWMBindingModel, DNABindingModels, load_binding_models
+from sklearn.preprocessing import StandardScaler
 
 
 class CrossvalOptions(Enum):
@@ -307,16 +309,56 @@ class DataGenerator:
         # Try Autosome mono
         AUTOSOME_mono_dir = os.path.join(self.datapath, 'preprocess/autosome/mono_pwm')
         get_motif(AUTOSOME_mono_dir, unpack=False, skiprows=1)
-
         return motifs
 
     def calc_pssm(self, pfm, pseudocounts=0.001):
         pfm += pseudocounts
         norm_pwm = pfm / pfm.sum(axis=1)[:, np.newaxis]
-        return np.log2(norm_pwm / 0.25)
+        return norm_pwm
+        #return np.log2(norm_pwm / 0.25)
 
+
+    def get_boley_scores(self, segment, bin_size, transcription_factor):
+        scores = np.load(os.path.join(self.save_dir, 'boley_%s_%d_%s.npy' % (segment, bin_size, transcription_factor)))
+        return scores
 
     ##### DATA GENERATION ##############################################################################
+
+    def gen_boley_scores(self, segment, bin_size, transcription_factor):
+
+        if segment not in ['train', 'ladder', 'test']:
+            raise Exception('Please specify the segment')
+        bin_correction = max(0, (bin_size - 200) / 2)
+
+        if segment == 'train':
+            length = self.train_length
+        elif segment == 'ladder':
+            length = self.ladder_length
+        elif segment == 'test':
+            length = self.test_length
+
+        scores = np.zeros((length, 7), dtype=np.float32)
+        binding_models = load_binding_models(os.path.join(self.datapath, "preprocess/models.yaml"))
+        model = binding_models.get_from_tfname(transcription_factor)[0]
+
+        lines = gzip.open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.bed.gz') % segment).read().splitlines()
+
+        quantile_probs = [99, 95, 90, 75, 50]
+
+        for l_idx, line in enumerate(lines):
+            if l_idx % 1000 == 0:
+                print l_idx
+            tokens = line.split()
+            chromosome = tokens[0]
+            start = int(tokens[1])
+            sequence = (self.hg19[chromosome][start - bin_correction:start + self.sequence_length + bin_correction]).upper()
+            boley_scores = DNASequence(sequence).score_binding_sites(model, 'MAX')
+            scores[l_idx, 0] = np.mean(boley_scores)
+            scores[l_idx, 1] = np.max(boley_scores)
+            scores[l_idx, 2:] = map(lambda x: np.percentile(boley_scores, x), quantile_probs)
+
+        np.save(os.path.join(self.save_dir, 'boley_%s_%d_%s' % (segment, bin_size, transcription_factor)), scores)
+
     def generate_sequence(self, segment, bin_size):
         if segment not in ['train', 'ladder', 'test']:
             raise Exception('Please specify the segment')
@@ -384,6 +426,20 @@ class DataGenerator:
 
     def generate_dnase(self, segment, bin_size, num_processes):
 
+        def get_DNAse_fold_track_mean(celltype):
+            fpath = os.path.join(self.datapath, 'dnase_fold_coverage/DNASE.%s.fc.signal.bigwig' % celltype)
+            process = Popen(["wiggletools", "meanI", fpath],
+                            stdout=PIPE)
+            (wiggle_output, _) = process.communicate()
+            return wiggle_output
+
+        def get_DNAse_fold_track_std(celltype):
+            fpath = os.path.join(self.datapath, 'dnase_fold_coverage/DNASE.%s.fc.signal.bigwig' % celltype)
+            process = Popen(["wiggletools", "stddevI", fpath],
+                            stdout=PIPE)
+            (wiggle_output, _) = process.communicate()
+            return wiggle_output
+
         def get_DNAse_fold_track(celltype, chromosome, left, right):
             fpath = os.path.join(self.datapath, 'dnase_fold_coverage/DNASE.%s.fc.signal.bigwig' % celltype)
             process = Popen(["wiggletools", "seek", chromosome, str(left), str(right), fpath],
@@ -417,33 +473,44 @@ class DataGenerator:
                 length = self.ladder_length
             elif segment == 'test':
                 length = self.test_length
-            dnase_features = np.zeros((length, bin_size), dtype=np.float16)
+
+            num_bins = 10
+
+            dnase_features = np.zeros((length, num_bins), dtype=np.float32)
             idx = 0
+
             for line in split_iter(lines):
                 tokens = line.split()
                 chromosome = tokens[0]
                 start = int(tokens[1])
                 end = int(tokens[2])
                 track = get_DNAse_fold_track(celltype, chromosome, start - bin_correction, end + bin_correction)
+                track = np.log(track+1)
+
                 for pos in range(start, end - 200 + 1, 50):
-                    sbin = np.log(track[pos - start:pos - start + bin_size]+1)
-                    dnase_features[idx, :] = sbin
+                    sbin = track[pos - start:pos - start + bin_size]
+                    binned_features = np.mean(np.split(sbin, num_bins), axis=1)
+                    dnase_features[idx, :] = binned_features
                     idx += 1
             print idx
             np.save(os.path.join(self.save_dir, 'dnase_fold_%s_%s_%d' % (segment, celltype, bin_size)), dnase_features)
 
         with open('../data/annotations/%s_regions.blacklistfiltered.merged.bed' % segment) as fin:
             lines = fin.read()
-        processes = []
-        for celltype in self.get_celltypes():
-            processes.append(Process(
-                target=DNAseSignalProcessor,
-                args=(lines, segment, celltype, bin_size))
-                )
+        if num_processes == 1:
+            for celltype in self.get_celltypes():
+                DNAseSignalProcessor(lines, segment, celltype, bin_size)
+        else:
+            processes = []
+            for celltype in self.get_celltypes():
+                processes.append(Process(
+                    target=DNAseSignalProcessor,
+                    args=(lines, segment, celltype, bin_size))
+                    )
 
-        for i in range(0, len(processes), num_processes):
-            map(lambda x: x.start(), processes[i:i + num_processes])
-            map(lambda x: x.join(), processes[i:i + num_processes])
+            for i in range(0, len(processes), num_processes):
+                map(lambda x: x.start(), processes[i:i + num_processes])
+                map(lambda x: x.join(), processes[i:i + num_processes])
 
     def generate_shape(self):
         return
@@ -458,6 +525,8 @@ if __name__ == '__main__':
     parser.add_argument('--segment', required=True)
     parser.add_argument('--bin_size', type=int, required=True)
     parser.add_argument('--num_jobs', type=int, required=False)
+    parser.add_argument('--gen_boley', action='store_true', required=False)
+    parser.add_argument('--transcription_factor', '-tf', default='TAF1', required=False)
 
     args = parser.parse_args()
     datagen = DataGenerator()
@@ -470,8 +539,5 @@ if __name__ == '__main__':
         datagen.generate_y()
     if args.gen_dnase:
         datagen.generate_dnase(args.segment, args.bin_size, args.num_jobs)
-
-
-
-
-
+    if args.gen_boley:
+        datagen.gen_boley_scores(args.segment, args.bin_size, args.transcription_factor)

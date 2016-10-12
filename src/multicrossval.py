@@ -5,14 +5,15 @@ import argparse
 
 
 class Evaluator:
-    def __init__(self, epochs=None, celltypes=None, batch_size=None, id =None):
+    def __init__(self, epochs, celltypes, batch_size, num_chunks, id):
 
         self.datagen = DataGenerator()
         self.model = MultiConvNet('../log/', batch_size=512 if batch_size is None else batch_size, num_epochs=1 if epochs is None else epochs,
                                   sequence_width=200, num_outputs=self.datagen.num_trans_fs,
                              eval_size=.2, early_stopping=10, num_dnase_features=63, dropout_rate=.25,
                              config=1, verbose=True, segment='train', learning_rate=0.001,
-                                  id=id)
+                                  name='multiconvnet_' + str(epochs) + str(celltypes) + str(batch_size), id=id,
+                                  num_chunks=num_chunks)
         self.celltypes = celltypes
 
     def print_results_tf(self, trans_f, y_test, y_pred):
@@ -129,14 +130,16 @@ class Evaluator:
                 if celltype not in self.datagen.get_celltypes_for_trans_f(trans_f):
                     continue
                 self.print_results_tf(trans_f, y_test[:2702470], y_pred)
-
+            break
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_epochs', '-ne', help='Number of epochs', required=False, type=int)
     parser.add_argument('--celltypes', '-ct', help='All/One', required=False)
-    parser.add_argument('--seperate_cost', '-sc', action='store_true', help='Seperate cost for bound and unbound', required=False)
+    parser.add_argument('--num_chunks', '-nc', help='number of chunks to train on', type=int, default=10,
+                        required=False)
     parser.add_argument('--batch_size', '-batch', help='Batch size', required=False, type=int)
     args = parser.parse_args()
-    evaluator = Evaluator(args.num_epochs, args.celltypes, args.batch_size, re.sub('[^0-9a-zA-Z]+', "", str(vars(args))))
+    evaluator = Evaluator(args.num_epochs, args.celltypes, args.batch_size, args.num_chunks,
+                          re.sub('[^0-9a-zA-Z]+', "", str(vars(args))))
     evaluator.run_benchmark()

@@ -20,5 +20,3 @@ for celltype in celltypes:
             bw.addEntries(["chr10"]*50, range(start, start+50), ends=range(start+1, start+51),
                           values=dnase[idx, :50].tolist())
         bw.close()
-
-

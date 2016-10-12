@@ -34,8 +34,20 @@ class bcolors:
 
 
 def calc_loss(logits, labels):
+    return tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits, labels))
+
+
+def calc_loss_seperate(logits, labels, ratio):
     entropies = tf.nn.sigmoid_cross_entropy_with_logits(logits, labels)
-    return tf.reduce_mean(entropies)
+    labels_complement = tf.constant(1.0, dtype=tf.float32) - labels
+    entropy_bound = tf.reduce_sum(tf.mul(labels, entropies))
+    entropy_unbound = tf.reduce_sum(tf.mul(labels_complement, entropies))
+    num_bound = tf.reduce_sum(labels)
+    num_unbound = tf.reduce_sum(labels_complement)
+    loss_bound = tf.mul(ratio, tf.cond(tf.equal(num_bound, tf.constant(0.0)), lambda: tf.constant(0.0),
+                         lambda: tf.div(entropy_bound, num_unbound)))
+    loss_unbound = tf.div(entropy_unbound, num_unbound)
+    return tf.add(loss_bound, loss_unbound)
 
 
 def calc_regression_loss(prediction, actual):
@@ -66,10 +78,14 @@ class ConvNet:
                  sequence_width=200, num_outputs=1, eval_size=0.2, early_stopping=100,
                  num_gen_expr_features=57820, num_dnase_features=4, num_shape_features=4, dropout_rate=.5,
                  config=1, verbose=True, transcription_factor='RFX5', regression=False,
-                 name='convnet', num_chunks=10, id='ID'):
+                 name='convnet', num_chunks=10, id='ID', debug=False):
         if config is None:
             config = 1
+        np.set_printoptions(suppress=True)
+        np.random.seed(12345)
+
         self.id = id
+        self.debug = debug
         self.num_chunks = min(num_chunks, 52)
         self.name = name
         self.regression = regression
@@ -87,19 +103,22 @@ class ConvNet:
         self.eval_size = eval_size
         self.verbose = verbose
         self.num_genexpr_features = num_gen_expr_features
+        self.tf_ratio = tf.placeholder(tf.float32, name='bound_ratio')
         self.tf_gene_expression = tf.placeholder(tf.float32, shape=(1, num_gen_expr_features), name='tpm_values')
-        self.tf_dnase_features = tf.placeholder(tf.float32, shape=(batch_size, num_dnase_features), name='dnase_features')
+        self.tf_dnase_features = tf.placeholder(tf.float32, shape=(batch_size, self.num_dnase_features), name='dnase_features')
         self.tf_shape = tf.placeholder(tf.float32, shape=(batch_size, self.height,
                                                           sequence_width, num_shape_features), name='shapes')
         self.tf_sequence = tf.placeholder(tf.float32, shape=(batch_size, self.height,
                                           sequence_width, self.num_channels), name='sequences')
+        self.tf_boley_scores = tf.placeholder(tf.float32, (self.batch_size, 7), name='boley_scores')
         self.tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_outputs), name='labels')
         self.keep_prob = tf.placeholder(tf.float32, name='keep_probability')
         self.early_stopping = EarlyStopping(max_stalls=early_stopping)
         self.dropout_rate = dropout_rate
         self.transcription_factor = transcription_factor
         self.tf_features = tf.placeholder(tf.float32, shape=(batch_size, self.height, sequence_width, self.num_channels+1))
-        self.logits = self.get_combined_model()
+        self.original_pssm = None
+        self.flatted_activations, self.logits = self.get_combined_model()
 
     def set_transcription_factor(self, transcription_factor):
         self.transcription_factor = transcription_factor
@@ -107,30 +126,32 @@ class ConvNet:
     def get_combined_model(self):
         with tf.variable_scope(self.name) as main_scope:
             with tf.variable_scope('R_MOTIF') as scope:
-                with tf.variable_scope('conv15_15') as convscope:
-                    kernel_width = 15
-                    num_filters = 100
-                    activation = convolution2d(self.tf_features, num_filters, [self.height, kernel_width])
 
-                with tf.variable_scope('pool35') as poolscope:
+                with tf.variable_scope('conv1') as convscope:
+                    kernel_width = 30
+                    num_filters = 10
+                    conv1 = convolution2d(self.tf_sequence, num_filters, [self.height, kernel_width], activation_fn=None)
+
+                with tf.variable_scope('pool') as poolscope:
                     pool_width = 35
-                    pool = tf.nn.relu(max_pool2d(activation, (self.height, pool_width), stride=pool_width))
+                    pool = tf.nn.relu(max_pool2d(conv1, (self.height, pool_width), stride=pool_width,padding='SAME'))
 
                 with tf.variable_scope('fc100') as fcscope:
                     flattened = flatten(pool)
+                    #flattened = tf.concat(1, [self.tf_boley_scores])
                     drop_rmotif = fully_connected(flattened, 100)
                     drop_rmotif = tf.nn.dropout(drop_rmotif, self.keep_prob)
 
-            with tf.variable_scope('output') as outscope:
-                logits = fully_connected(drop_rmotif, 1, None, variables_collections='test')
+                with tf.variable_scope('output') as outscope:
+                    logits = fully_connected(drop_rmotif, 1, None)
 
-        return logits
+        return flattened, logits
 
     def fit_combined(self, celltypes_train):
         summary_writer = tf.train.SummaryWriter(self.model_dir + 'train')
         try:
             with tf.variable_scope(self.name+'_opt') as scope:
-                loss = calc_loss(self.logits, self.tf_train_labels)
+                loss = calc_loss_seperate(self.logits, self.tf_train_labels, self.tf_ratio)  #calc_loss(self.logits, self.tf_train_labels)
                 optimizer = tf.train.AdamOptimizer(learning_rate=0.001, beta1=0.9, beta2=0.999).minimize(loss)
 
             saver = tf.train.Saver([var for var in tf.get_collection(tf.GraphKeys.VARIABLES) if var.op.name.startswith(self.name)])
@@ -148,13 +169,15 @@ class ConvNet:
 
                 trans_f_idx = self.datagen.get_trans_f_lookup()[self.transcription_factor]
 
+                boley_scores = self.datagen.get_boley_scores('train', 200, 'TAF1')
+
                 for epoch in xrange(1, self.num_epochs+1):
                     train_losses = []
                     start_time = time.time()
 
                     for c_idx, celltype in enumerate(celltypes_train):
                         y = self.datagen.get_y(celltype)
-                        dnase_features = self.datagen.get_dnase_features('train', celltype, self.bin_size)
+                        dnase_features = self.datagen.get_dnase_features('train', celltype, 200)
                         print 'Data for celltype', celltype, 'loaded.'
 
                         for chunk_id in range(1, self.num_chunks+1):
@@ -165,6 +188,29 @@ class ConvNet:
                             y_chunk = y[ids]
                             dnase_chunk = dnase_features[ids]
 
+                            boley_scores_chunk = boley_scores[ids]
+
+                            # Batch stratification and shuffling
+
+                            bound_idxs = np.where(y_chunk[:, trans_f_idx] == 1)[0]
+                            unbound_idxs = np.where(y_chunk[:, trans_f_idx] == 0)[0]
+
+                            np.random.shuffle(bound_idxs)
+                            np.random.shuffle(unbound_idxs)
+                            shuffle_idxs = np.zeros((y_chunk.shape[0]), dtype=np.int32)
+                            chunk_ratio = unbound_idxs.shape[0]/bound_idxs.shape[0]
+                            shuffle_it = 0
+                            for shuffle_it in range(bound_idxs.shape[0]):
+                                offset = shuffle_it*(chunk_ratio+1)
+                                shuffle_idxs[offset] = bound_idxs[shuffle_it]
+                                shuffle_idxs[offset+1:offset+chunk_ratio+1] = unbound_idxs[shuffle_it*chunk_ratio:(shuffle_it+1)*chunk_ratio]
+                            shuffle_it += 1
+                            shuffle_idxs[shuffle_it*(chunk_ratio+1):] = unbound_idxs[shuffle_it*chunk_ratio:]
+
+                            X = X[shuffle_idxs]
+                            y_chunk = y_chunk[shuffle_idxs]
+                            dnase_chunk = dnase_chunk[shuffle_idxs]
+
                             print "Loaded %d examples for batch %d" % (X.shape[0], chunk_id)
 
                             batch_train_losses = []
@@ -173,6 +219,7 @@ class ConvNet:
                                 batch_sequence = np.reshape(X[offset:end, :, :],
                                                             (self.batch_size, self.height, self.bin_size,
                                                              self.num_channels))
+
                                 batch_features[:, :, :, :self.num_channels] = batch_sequence
 
                                 if self.config == 1:
@@ -183,10 +230,13 @@ class ConvNet:
                                         np.reshape(dnase_chunk[offset:end, :],
                                                    (self.batch_size, self.height, self.bin_size))
                                 batch_labels = np.reshape(y_chunk[offset:end, trans_f_idx], (self.batch_size, self.num_outputs))
-                                feed_dict = {self.tf_sequence: batch_sequence,
-                                             self.tf_features: batch_features,
+                                feed_dict = {
+                                            self.tf_boley_scores: boley_scores_chunk[offset:end],
+                                            self.tf_sequence: batch_sequence,
+                                            self.tf_dnase_features: dnase_chunk[offset:end, :],
                                              self.tf_train_labels: batch_labels,
                                              self.keep_prob: 1 - self.dropout_rate,
+                                             self.tf_ratio: chunk_ratio,
                                              }
 
                                 _, r_loss = \
@@ -196,6 +246,50 @@ class ConvNet:
 
                             print "Batch loss", np.mean(np.array(batch_train_losses))
                             train_losses.extend(batch_train_losses)
+
+                            if self.debug:
+                                vars = [var for var in tf.get_collection(tf.GraphKeys.VARIABLES) if
+                                 var.op.name.startswith(self.name)]
+                                for bound_switch in ['bound', 'unbound']:
+                                    b = 1 if bound_switch == 'bound' else 0
+                                    bound_idxs = np.where(y_chunk[:, trans_f_idx] == b)[0]
+                                    np.random.shuffle(bound_idxs)
+                                    num_examples = bound_idxs.shape[0]
+
+                                    mean_activations = []
+                                    dnase_profile = np.sum(dnase_chunk[bound_idxs], axis=0)
+
+                                    for offset in xrange(0, num_examples - self.batch_size, self.batch_size):
+                                        end = offset + self.batch_size
+                                        batch_sequence = np.reshape(X[bound_idxs[offset:end], :, :],
+                                                                    (self.batch_size, self.height, self.bin_size,
+                                                                     self.num_channels))
+                                        batch_features[:, :, :, :self.num_channels] = batch_sequence
+
+                                        if self.config == 1:
+                                            batch_features[:, :, :, self.num_channels] = \
+                                                np.zeros((self.batch_size, self.height, self.bin_size),
+                                                         dtype=np.float32)
+                                        else:
+                                            batch_features[:, :, :, self.num_channels] = \
+                                                np.reshape(dnase_chunk[bound_idxs[offset:end], :],
+                                                           (self.batch_size, self.height, self.bin_size))
+
+                                        batch_labels = np.reshape(y_chunk[bound_idxs[offset:end], trans_f_idx],
+                                                                  (self.batch_size, self.num_outputs))
+                                        feed_dict = {
+                                            self.tf_boley_scores: boley_scores_chunk[offset:end],
+                                            self.tf_sequence: batch_sequence,
+                                            self.tf_dnase_features: dnase_chunk[bound_idxs[offset:end]],
+                                            self.tf_train_labels: batch_labels,
+                                            self.keep_prob: 1,
+                                        }
+                                        activations = session.run(self.flatted_activations, feed_dict=feed_dict)
+
+                                        mean_activations.append(np.mean(activations))
+                                    mean_activation = np.mean(np.array(mean_activations))
+                                    dnase_profile /= bound_idxs.shape[0]
+                                    pdb.set_trace()
 
                     train_losses = np.array(train_losses)
                     t_loss = np.mean(train_losses)
@@ -221,7 +315,7 @@ class ConvNet:
         except KeyboardInterrupt:
             pass
 
-    def predict_combined(self, X, dnase_features):
+    def predict_combined(self, X, dnase_features, boley_scores):
         '''
                 Run trained model
                 :return: predictions
@@ -238,7 +332,7 @@ class ConvNet:
             for offset in xrange(0, num_examples, self.batch_size):
                 end = min(offset + self.batch_size, num_examples)
                 offset_ = offset - (self.batch_size - (end - offset))
-
+                batch_sequence = np.reshape(X[offset_:end, :], (self.batch_size, self.height, self.bin_size, self.num_channels))
                 batch_features[:, :, :, :self.num_channels] = \
                     np.reshape(X[offset_:end, :], (self.batch_size, self.height, self.bin_size, self.num_channels))
                 if self.config == 1:
@@ -248,7 +342,10 @@ class ConvNet:
                     batch_features[:, :, :, self.num_channels] = \
                         np.reshape(dnase_features[offset_:end, :], (self.batch_size, self.height,
                                                                     self.bin_size))
-                feed_dict = {self.tf_features: batch_features,
+                feed_dict = {
+                            self.tf_boley_scores: boley_scores[offset_:end],
+                            self.tf_dnase_features: dnase_features[offset_:end],
+                            self.tf_sequence: batch_sequence,
                              self.keep_prob: 1,
                              }
                 prediction = session.run([prediction_op], feed_dict=feed_dict)

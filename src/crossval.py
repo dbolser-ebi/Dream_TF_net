@@ -5,6 +5,7 @@ from datagen import *
 from ensemblr import *
 from bisect import bisect_left
 import re
+from kerasconvnet import *
 from scipy.stats import rankdata
 
 
@@ -176,7 +177,7 @@ class Evaluator:
         celltypes_train = celltypes[1:1+self.num_train_celltypes]
         celltype_test = celltypes[0]
 
-        model.fit_combined(celltypes_train)
+        model.fit_combined(celltypes_train, celltype_test)
 
         print 'TRAINING COMPLETED'
 
@@ -188,7 +189,7 @@ class Evaluator:
 
         ids = range(2702470) #chr10
         X = self.datagen.get_sequece_from_ids(ids, 'train', self.bin_size)
-        dnase_features = self.datagen.get_dnase_features_from_ids(ids, 'train', celltype_test, dnase_bin_size=self.bin_size)
+        dnase_features = self.datagen.get_dnase_features_from_ids(ids, 'train', celltype_test, dnase_bin_size=200)
 
         trans_f_lookup = self.datagen.get_trans_f_lookup()
         y_test = np.load('../data/preprocess/features/y_%s.npy' % celltype_test)[ids, trans_f_lookup[transcription_factor]]
@@ -228,6 +229,7 @@ if __name__ == '__main__':
     parser.add_argument('--chipseq_bin_size', '-cbs', help='CHIPSEQ bin size', type=int, default=200, required=False)
     parser.add_argument('--debug', '-dbg', help='Debug the model', action='store_true', required=False)
     parser.add_argument('--num_train_celltypes', '-ntc', help='Number of celltypes to use for training', type=int, default=10, required=False)
+    parser.add_argument('--verbose', action='store_true', default=False, required=False)
 
     args = parser.parse_args()
     model = None
@@ -236,14 +238,18 @@ if __name__ == '__main__':
         model = ConvNet('../log/', num_epochs=args.num_epochs, batch_size=args.batch_size,
                         num_gen_expr_features=32, config=args.config, dropout_rate=0.25,
                         eval_size=0.2, num_shape_features=4, sequence_width=args.bin_size, regression=args.regression,
-                        num_chunks=args.num_chunks, id=re.sub('[^0-9a-zA-Z]+', "", str(vars(args))))
+                        num_chunks=args.num_chunks, id=re.sub('[^0-9a-zA-Z]+', "", str(vars(args))),
+                        debug=args.debug, num_dnase_features=10)
+    elif args.model == 'KC':
+        model = KConvNet(args.bin_size, args.num_epochs, args.num_chunks, args.batch_size, 4, args.verbose, args.config)
 
     else:
         print "Model options: TFC (TensorFlow Convnet) / RENS (Random forest classifier ensemble)"
 
     transcription_factors = args.transcription_factors.split(',')
     evaluator = Evaluator('../data/', bin_size=args.bin_size, dnase_bin_size=args.bin_size,
-                          chipseq_bin_size=args.chipseq_bin_size, debug=args.debug, num_train_celltypes=args.num_train_celltypes)
+                          chipseq_bin_size=args.chipseq_bin_size, debug=args.debug,
+                          num_train_celltypes=args.num_train_celltypes)
     for transcription_factor in transcription_factors:
         if args.validate:
             evaluator.run_cross_cell_benchmark(model, transcription_factor,
