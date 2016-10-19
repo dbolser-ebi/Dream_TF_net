@@ -1,19 +1,23 @@
 from multiconv import *
+from kerasmulticonv import *
 from datagen import *
 from performance_metrics import *
 import argparse
 
 
 class Evaluator:
-    def __init__(self, epochs, celltypes, batch_size, num_chunks, id):
+    def __init__(self, epochs, celltypes, batch_size, num_chunks, model_name, verbose, id):
 
         self.datagen = DataGenerator()
-        self.model = MultiConvNet('../log/', batch_size=512 if batch_size is None else batch_size, num_epochs=1 if epochs is None else epochs,
-                                  sequence_width=200, num_outputs=self.datagen.num_trans_fs,
-                             eval_size=.2, early_stopping=10, num_dnase_features=63, dropout_rate=.25,
-                             config=1, verbose=True, segment='train', learning_rate=0.001,
-                                  name='multiconvnet_' + str(epochs) + str(celltypes) + str(batch_size), id=id,
-                                  num_chunks=num_chunks)
+        if model_name == 'TFC':
+            self.model = MultiConvNet('../log/', batch_size=512 if batch_size is None else batch_size, num_epochs=1 if epochs is None else epochs,
+                                      sequence_width=200, num_outputs=self.datagen.num_trans_fs,
+                                 eval_size=.2, early_stopping=10, num_dnase_features=63, dropout_rate=.25,
+                                 config=1, verbose=True, segment='train', learning_rate=0.001,
+                                      name='multiconvnet_' + str(epochs) + str(celltypes) + str(batch_size), id=id,
+                                      num_chunks=num_chunks)
+        elif model_name == 'KC':
+            self.model = KMultiConvNet(num_epochs=epochs, num_chunks=num_chunks, verbose=verbose, batch_size=batch_size)
         self.celltypes = celltypes
 
     def print_results_tf(self, trans_f, y_test, y_pred):
@@ -135,11 +139,13 @@ class Evaluator:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_epochs', '-ne', help='Number of epochs', required=False, type=int)
-    parser.add_argument('--celltypes', '-ct', help='All/One', required=False)
+    parser.add_argument('--celltypes', '-ct', help='All/One', required=False, default='One')
     parser.add_argument('--num_chunks', '-nc', help='number of chunks to train on', type=int, default=10,
                         required=False)
     parser.add_argument('--batch_size', '-batch', help='Batch size', required=False, type=int)
+    parser.add_argument('--model', '-m', help='Model TFC/KC', required=False, default='TFC')
+    parser.add_argument('--verbose', help='verbose optimizer', action='store_true', required=False, default=False)
     args = parser.parse_args()
-    evaluator = Evaluator(args.num_epochs, args.celltypes, args.batch_size, args.num_chunks,
+    evaluator = Evaluator(args.num_epochs, args.celltypes, args.batch_size, args.num_chunks, args.model, args.verbose,
                           re.sub('[^0-9a-zA-Z]+', "", str(vars(args))))
     evaluator.run_benchmark()

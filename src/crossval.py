@@ -1,12 +1,5 @@
-from performance_metrics import *
-from convnet import *
 import sqlite3
-from datagen import *
-from ensemblr import *
-from bisect import bisect_left
-import re
 from kerasconvnet import *
-from scipy.stats import rankdata
 
 
 class Evaluator:
@@ -27,13 +20,6 @@ class Evaluator:
         self.debug = debug
         self.num_train_celltypes = num_train_celltypes
         self.datagen = DataGenerator()
-
-    def print_results(self, y_test, y_pred):
-        y_pred = rankdata(y_pred).astype(np.float32)/len(y_pred)
-        print 'AU ROC', auroc(y_test.flatten(), y_pred.flatten())
-        print 'AU PRC', auprc(y_test.flatten(), y_pred.flatten())
-        print 'RECALL AT FDR 0.5', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.50)
-        print 'RECALL AT FDR 0.1', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.10)
 
     def write_results_to_database(self, y_test, y_pred, model, arguments, transcription_factor, dbname='results.db'):
         conn = sqlite3.connect('../results/'+dbname)
@@ -118,7 +104,7 @@ class Evaluator:
 
         model.set_transcription_factor(transcription_factor)
 
-        model.fit_combined(celltypes)
+        model.fit(celltypes, celltypes[-1])
 
         if leaderboard:
             print "Creating predictions for leaderboard"
@@ -129,11 +115,6 @@ class Evaluator:
 
         part = 'ladder' if leaderboard else 'test'
 
-        if leaderboard:
-            num_test_indices = 8843011
-        else:
-            num_test_indices = 60519747
-
         segment = 'ladder' if leaderboard else 'test'
 
         if transcription_factor not in tf_mapper:
@@ -141,14 +122,7 @@ class Evaluator:
 
         for test_celltype in tf_mapper[transcription_factor]:
 
-            dnase_features = np.load('../data/preprocess/DNASE_FEATURES_NORM/%s_%s_%d.gz.npy'
-                                         % (test_celltype, part, self.dnase_bin_size))
-            y_pred = []
-            stride = 1000000
-            for start in range(0, num_test_indices, stride):
-                ids = range(start, min(start + stride, num_test_indices))
-                X = self.datagen.get_sequece_from_ids(ids, segment)
-                y_pred.extend(list(model.predict_combined(X, dnase_features)))
+            model.predict(test_celltype, segment, False)
 
             fin = gzip.open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.bed.gz' % part))
 
@@ -177,7 +151,7 @@ class Evaluator:
         celltypes_train = celltypes[1:1+self.num_train_celltypes]
         celltype_test = celltypes[0]
 
-        model.fit_combined(celltypes_train, celltype_test)
+        model.fit(celltypes_train, celltype_test)
 
         print 'TRAINING COMPLETED'
 
@@ -188,12 +162,9 @@ class Evaluator:
         print "Validating on celltype", celltype_test
 
         ids = range(2702470) #chr10
-        X = self.datagen.get_sequece_from_ids(ids, 'train', self.bin_size)
-        dnase_features = self.datagen.get_dnase_features_from_ids(ids, 'train', celltype_test, dnase_bin_size=200)
-
         trans_f_lookup = self.datagen.get_trans_f_lookup()
         y_test = np.load('../data/preprocess/features/y_%s.npy' % celltype_test)[ids, trans_f_lookup[transcription_factor]]
-        y_pred = model.predict_combined(X, dnase_features)
+        y_pred = model.predict(celltype_test, 'train', True)
         if self.debug:
             with open('../data/debug/predictions_' +
                               celltype_test + transcription_factor + model.__class__.__name__ + 'chr10' + '.bedgraph', 'w') \
@@ -208,20 +179,19 @@ class Evaluator:
                     end = tokens[2]
                     print>> fout, 'chr10', start, end, y_pred[idx]
 
-        self.print_results(y_test, y_pred)
+        print_results(y_test, y_pred)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--transcription_factors', '-tfs', help='Comma separated list of transcription factors', required=True)
-    parser.add_argument('--model', '-m', help='Choose model [TFC/RENS]', required=True)
+    parser.add_argument('--model', '-m', help='Choose model [KC]', required=True)
     parser.add_argument('--regression', '-reg', help='Use the chipseq signal strength as targets', action='store_true',
                         required=False)
     parser.add_argument('--validate', '-v', action='store_true', help='run cross TF validation benchmark', required=False)
     parser.add_argument('--ladder', '-l', action='store_true', help='predict TF ladderboard', required=False)
     parser.add_argument('--test', '-t', action='store_true', help='predict TF final round', required=False)
     parser.add_argument('--batch_size', help='batch size', type=int, default=512, required=False)
-    parser.add_argument('--num_chunks', '-nc', help='number of chunks to train on', type=int, default=10, required=False)
     parser.add_argument('--config', '-c', help='configuration of model', default=7, type=int, required=False)
     parser.add_argument('--num_epochs', '-ne', help='number of epochs', type=int, default=1, required=False)
     parser.add_argument('--bin_size', '-bs', help='Sequence bin size (must be an even number >= 200)', type=int, default=200, required=False)
@@ -233,18 +203,16 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     model = None
-
+    '''
     if args.model == 'TFC':
         model = ConvNet('../log/', num_epochs=args.num_epochs, batch_size=args.batch_size,
                         num_gen_expr_features=32, config=args.config, dropout_rate=0.25,
                         eval_size=0.2, num_shape_features=4, sequence_width=args.bin_size, regression=args.regression,
                         num_chunks=args.num_chunks, id=re.sub('[^0-9a-zA-Z]+', "", str(vars(args))),
                         debug=args.debug, num_dnase_features=10)
-    elif args.model == 'KC':
-        model = KConvNet(args.bin_size, args.num_epochs, args.num_chunks, args.batch_size, 4, args.verbose, args.config)
-
-    else:
-        print "Model options: TFC (TensorFlow Convnet) / RENS (Random forest classifier ensemble)"
+    '''
+    if args.model == 'KC':
+        model = KConvNet(args.bin_size, args.num_epochs, args.batch_size, 4, args.verbose, args.config)
 
     transcription_factors = args.transcription_factors.split(',')
     evaluator = Evaluator('../data/', bin_size=args.bin_size, dnase_bin_size=args.bin_size,

@@ -11,7 +11,7 @@ import random
 from enum import Enum
 from wiggleReader import *
 from multiprocessing import Process
-from pyDNAbinding.binding_model import DNASequence, PWMBindingModel, DNABindingModels, load_binding_models
+from bisect import *
 from sklearn.preprocessing import StandardScaler
 
 
@@ -28,6 +28,7 @@ class DataGenerator:
         self.label_path = os.path.join(self.datapath, 'chipseq_labels/')
         self.hg19 = Fasta(os.path.join(self.datapath, 'annotations/hg19.genome.fa'))
         self.sequence_length = 200
+        self.correction = 400
 
         self.train_length = 51676736
         self.ladder_length = 8843011
@@ -317,88 +318,52 @@ class DataGenerator:
         return norm_pwm
         #return np.log2(norm_pwm / 0.25)
 
+    def get_dnase_accesible_idxs(self, celltype):
+        return
 
-    def get_boley_scores(self, segment, bin_size, transcription_factor):
-        scores = np.load(os.path.join(self.save_dir, 'boley_%s_%d_%s.npy' % (segment, bin_size, transcription_factor)))
-        return scores
+    def get_positions_for_ids(self, ids, segment):
+        start_positions = []
+        offset = 0
+        with open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.merged.bed' % segment)) as fin:
+            for line in fin:
+                tokens = line.split()
+                start = int(tokens[1])
+                end = int(tokens[2])
+                start_positions.append(offset)
+                offset += ((end-start)-150)/50
+        positions = []
+        for id in ids:
+            jumps = bisect(start_positions, id)-1
+            positions.append(self.correction+jumps*(150+self.correction*2)+id*50)
+        return positions
 
     ##### DATA GENERATION ##############################################################################
 
-    def gen_boley_scores(self, segment, bin_size, transcription_factor):
-
+    def generate_sequence(self, segment):
         if segment not in ['train', 'ladder', 'test']:
             raise Exception('Please specify the segment')
-        bin_correction = max(0, (bin_size - 200) / 2)
-
-        if segment == 'train':
-            length = self.train_length
-        elif segment == 'ladder':
-            length = self.ladder_length
-        elif segment == 'test':
-            length = self.test_length
-
-        scores = np.zeros((length, 7), dtype=np.float32)
-        binding_models = load_binding_models(os.path.join(self.datapath, "preprocess/models.yaml"))
-        model = binding_models.get_from_tfname(transcription_factor)[0]
-
-        lines = gzip.open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.bed.gz') % segment).read().splitlines()
-
-        quantile_probs = [99, 95, 90, 75, 50]
-
-        for l_idx, line in enumerate(lines):
-            if l_idx % 1000 == 0:
-                print l_idx
-            tokens = line.split()
-            chromosome = tokens[0]
-            start = int(tokens[1])
-            sequence = (self.hg19[chromosome][start - bin_correction:start + self.sequence_length + bin_correction]).upper()
-            boley_scores = DNASequence(sequence).score_binding_sites(model, 'MAX')
-            scores[l_idx, 0] = np.mean(boley_scores)
-            scores[l_idx, 1] = np.max(boley_scores)
-            scores[l_idx, 2:] = map(lambda x: np.percentile(boley_scores, x), quantile_probs)
-
-        np.save(os.path.join(self.save_dir, 'boley_%s_%d_%s' % (segment, bin_size, transcription_factor)), scores)
-
-    def generate_sequence(self, segment, bin_size):
-        if segment not in ['train', 'ladder', 'test']:
-            raise Exception('Please specify the segment')
-        bin_correction = max(0, (bin_size - 200) / 2)
-
-        l_idx = 0
-        with gzip.open('../data/annotations/%s_regions.blacklistfiltered.bed.gz' % segment) as fin:
+        num_positions = 0
+        with open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.merged.bed' % segment)) as fin:
             for line in fin:
-                if l_idx % self.chunk_size == 0:
-                    if l_idx != 0:
-                        # save X
-                        save_path = os.path.join(self.save_dir,
-                                                 'segment_' + segment +
-                                                 '_bin_size_' + str(bin_size) +
-                                                 '_chunk_id_' + str(l_idx-X.shape[0]) + '.npy')
-                        np.save(save_path, X)
-                        print "Chunk", l_idx, "saved"
-
-                    if segment == 'train':
-                        length = min(self.chunk_size, self.train_length-l_idx)
-                    if segment == 'ladder':
-                        length = min(self.chunk_size, self.ladder_length-l_idx)
-                    if segment == 'test':
-                        length = min(self.chunk_size, self.test_length-l_idx)
-                    X = np.zeros((length, bin_size, self.num_channels), dtype=np.float16)
-
+                tokens = line.split()
+                start = int(tokens[1])
+                end = int(tokens[2])
+                num_positions += end-start+self.correction*2
+        X = np.zeros((num_positions, 4), dtype=np.float16)
+        offset = 0
+        with open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.merged.bed' % segment)) as fin:
+            for line in fin:
                 tokens = line.split()
                 chromosome = tokens[0]
                 start = int(tokens[1])
-                sequence = self.hg19[chromosome][start-bin_correction:start + self.sequence_length + bin_correction]
+                end = int(tokens[2])
+                sequence = self.hg19[chromosome][start-self.correction:end+self.correction]
+                print "len sequence", len(sequence), end-start+self.correction*2
                 sequence_one_hot = self.sequence_to_one_hot(np.array(list(sequence)))
-                X[l_idx % self.chunk_size, :, :] = sequence_one_hot
-                l_idx += 1
-        # save remainder X
-        save_path = os.path.join(self.save_dir,
-                                 'segment_' + segment +
-                                 '_bin_size_' + str(bin_size) +
-                                 '_chunk_id_' + str(l_idx-X.shape[0]) + '.npy')
-        if not os.path.exists(save_path):
-            np.save(save_path, X)
+                X[offset:offset+end-start+self.correction*2] = sequence_one_hot
+                offset += end - start + self.correction*2
+        save_path = os.path.join(self.save_dir, 'sequence_' + segment + '.npy')
+        np.save(save_path, X)
 
     def generate_y(self):
         trans_f_lookup = self.get_trans_f_lookup()
@@ -424,28 +389,14 @@ class DataGenerator:
                     np.reshape(y[:, :, celltype_lookup[celltype]], (self.train_length, self.num_trans_fs))
                     )
 
-    def generate_dnase(self, segment, bin_size, num_processes):
-
-        def get_DNAse_fold_track_mean(celltype):
-            fpath = os.path.join(self.datapath, 'dnase_fold_coverage/DNASE.%s.fc.signal.bigwig' % celltype)
-            process = Popen(["wiggletools", "meanI", fpath],
-                            stdout=PIPE)
-            (wiggle_output, _) = process.communicate()
-            return wiggle_output
-
-        def get_DNAse_fold_track_std(celltype):
-            fpath = os.path.join(self.datapath, 'dnase_fold_coverage/DNASE.%s.fc.signal.bigwig' % celltype)
-            process = Popen(["wiggletools", "stddevI", fpath],
-                            stdout=PIPE)
-            (wiggle_output, _) = process.communicate()
-            return wiggle_output
+    def generate_dnase(self, segment, num_processes):
 
         def get_DNAse_fold_track(celltype, chromosome, left, right):
             fpath = os.path.join(self.datapath, 'dnase_fold_coverage/DNASE.%s.fc.signal.bigwig' % celltype)
             process = Popen(["wiggletools", "seek", chromosome, str(left), str(right), fpath],
                             stdout=PIPE)
             (wiggle_output, _) = process.communicate()
-            track = np.zeros((right - left + 1,), dtype=np.float32)
+            track = np.zeros((right - left,), dtype=np.float32)
             position = 0
             for line in split_iter(wiggle_output):
                 tokens = line.split()
@@ -464,48 +415,42 @@ class DataGenerator:
                     position += 1
             return track
 
-        def DNAseSignalProcessor(lines, segment, celltype, bin_size):
-            print "parsing dnase for", segment, celltype, bin_size
-            bin_correction = max(0, (bin_size - 200) / 2)
-            if segment == 'train':
-                length = self.train_length
-            elif segment == 'ladder':
-                length = self.ladder_length
-            elif segment == 'test':
-                length = self.test_length
-
-            num_bins = 10
-
-            dnase_features = np.zeros((length, num_bins), dtype=np.float32)
-            idx = 0
+        def DNAseSignalProcessor(segment, celltype, length):
+            print "generating", celltype, segment
+            dnase_features = np.zeros((length,), dtype=np.float32)
+            offset = 0
+            with open('../data/annotations/%s_regions.blacklistfiltered.merged.bed' % segment) as fin:
+                lines = fin.read()
 
             for line in split_iter(lines):
                 tokens = line.split()
                 chromosome = tokens[0]
                 start = int(tokens[1])
                 end = int(tokens[2])
-                track = get_DNAse_fold_track(celltype, chromosome, start - bin_correction, end + bin_correction)
-                track = np.log(track+1)
+                track = get_DNAse_fold_track(celltype, chromosome, start-self.correction, end+self.correction)
+                dnase_features[offset:offset+end-start+self.correction*2] = track
+                offset += end-start+self.correction*2
 
-                for pos in range(start, end - 200 + 1, 50):
-                    sbin = track[pos - start:pos - start + bin_size]
-                    binned_features = np.mean(np.split(sbin, num_bins), axis=1)
-                    dnase_features[idx, :] = binned_features
-                    idx += 1
-            print idx
-            np.save(os.path.join(self.save_dir, 'dnase_fold_%s_%s_%d' % (segment, celltype, bin_size)), dnase_features)
+            np.save(os.path.join(self.save_dir, 'dnase_fold_%s_%s' % (segment, celltype)), dnase_features)
 
         with open('../data/annotations/%s_regions.blacklistfiltered.merged.bed' % segment) as fin:
             lines = fin.read()
+        length = 0
+        for line in split_iter(lines):
+            tokens = line.split()
+            start = int(tokens[1])
+            end = int(tokens[2])
+            length += end-start+self.correction*2
+
         if num_processes == 1:
             for celltype in self.get_celltypes():
-                DNAseSignalProcessor(lines, segment, celltype, bin_size)
+                DNAseSignalProcessor(segment, celltype, length)
         else:
             processes = []
             for celltype in self.get_celltypes():
                 processes.append(Process(
                     target=DNAseSignalProcessor,
-                    args=(lines, segment, celltype, bin_size))
+                    args=(segment, celltype, length))
                     )
 
             for i in range(0, len(processes), num_processes):
@@ -523,21 +468,14 @@ if __name__ == '__main__':
     parser.add_argument('--gen_y', action='store_true', required=False)
     parser.add_argument('--gen_dnase', action='store_true', required=False)
     parser.add_argument('--segment', required=True)
-    parser.add_argument('--bin_size', type=int, required=True)
     parser.add_argument('--num_jobs', type=int, required=False)
-    parser.add_argument('--gen_boley', action='store_true', required=False)
-    parser.add_argument('--transcription_factor', '-tf', default='TAF1', required=False)
 
     args = parser.parse_args()
     datagen = DataGenerator()
 
-    assert(args.bin_size >= 200 and args.bin_size % 2 == 0)
-
     if args.gen_sequence:
-        datagen.generate_sequence(args.segment, args.bin_size)
+        datagen.generate_sequence(args.segment)
     if args.gen_y:
         datagen.generate_y()
     if args.gen_dnase:
-        datagen.generate_dnase(args.segment, args.bin_size, args.num_jobs)
-    if args.gen_boley:
-        datagen.gen_boley_scores(args.segment, args.bin_size, args.transcription_factor)
+        datagen.generate_dnase(args.segment, args.num_jobs)
