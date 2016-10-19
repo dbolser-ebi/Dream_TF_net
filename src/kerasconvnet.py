@@ -7,18 +7,21 @@ from keras.callbacks import Callback
 tf.python.control_flow_ops = tf
 from datagen import *
 
+
 class ValidCallBack(Callback):
-    def __init__(self, celltype, y_valid):
+    def __init__(self, batch_generator, y_valid):
         super(ValidCallBack, self).__init__()
-        self.celltype = celltype
+        self.batch_generator = batch_generator
         self.y_valid = y_valid
 
     def on_epoch_begin(self, epoch, logs={}):
         pass
 
     def on_epoch_end(self, epoch, logs={}):
-        predictions = self.model.predict(self.celltype, 'train', True)
-        print_results(self.y_valid, predictions)
+        #predictions = self.model.predict_generator(self.batch_generator,
+        #                                           2702470, 10, 6)
+        #print_results(self.y_valid, predictions)
+        pass
 
     def on_batch_begin(self, batch, logs={}):
         pass
@@ -85,7 +88,7 @@ class KConvNet:
 
         sequence_bin_correction = (self.sequence_bin_size - self.bin_size) / 2
         dnase_bin_correction = (self.dnase_bin_size - self.bin_size) / 2
-        ids = np.array(range(self.datagen.train_length))
+        ids = self.datagen.get_dnase_accesible_ids(celltypes_train, False)#np.array(range(self.datagen.train_length))
         start_positions = np.array(self.datagen.get_positions_for_ids(ids, 'train'))
         assert(ids.size == start_positions.size)
         sequence_all = np.load(os.path.join(self.datagen.save_dir, 'sequence_' + 'train' + '.npy'))
@@ -138,13 +141,13 @@ class KConvNet:
 
         self.model.fit_generator(
             self.generate_batches(celltypes_train),
-            self.datagen.train_length,
+            1000000,#self.datagen.train_length,
             self.num_epochs,
             1 if self.verbose else 0,
             class_weight={0: 1.0, 1: ratio},
             max_q_size=10,
             nb_worker=6,
-            callbacks=[ValidCallBack(celltype_test, y_valid)]
+            callbacks=[ValidCallBack(self.generate_test_batches(celltype_test, 'train', True), y_valid)]
         )
 
     def generate_test_batches(self, celltype, segment, validation=False):

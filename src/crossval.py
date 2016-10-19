@@ -4,7 +4,7 @@ from kerasconvnet import *
 
 class Evaluator:
 
-    def __init__(self, datapath, bin_size=200, num_dnase_features=4,
+    def __init__(self, datapath, sequence_bin_size=200, num_dnase_features=4,
                  unbound_fraction=1.0, dnase_bin_size=200, chipseq_bin_size=200, debug=False, num_train_celltypes=10):
         self.num_dnase_features = num_dnase_features
         self.num_train_instances = 51676736
@@ -12,7 +12,7 @@ class Evaluator:
         self.num_celltypes = 14
         self.num_train_celltypes = 11
         self.datapath = datapath
-        self.bin_size = bin_size
+        self.sequence_bin_size = sequence_bin_size
         self.unbound_fraction = unbound_fraction
         self.chipseq_bin_size = chipseq_bin_size
         self.dnase_bin_size = dnase_bin_size
@@ -122,14 +122,17 @@ class Evaluator:
 
         for test_celltype in tf_mapper[transcription_factor]:
 
-            model.predict(test_celltype, segment, False)
+            y_pred = model.predict(test_celltype, segment, False)
 
             fin = gzip.open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.bed.gz' % part))
-
+            if not os.path.exists('../results/ladder'):
+                os.mkdir('../results/ladder')
+            if not os.path.exists('../results/test'):
+                os.mkdir('../results/test')
             if leaderboard:
-                f_out_name = '../results/' + 'L.' + transcription_factor + '.' + test_celltype + '.tab.gz'
+                f_out_name = '../results/ladder/' + 'L.' + transcription_factor + '.' + test_celltype + '.tab.gz'
             else:
-                f_out_name = '../results/' + 'F.' + transcription_factor + '.' + test_celltype + '.tab.gz'
+                f_out_name = '../results/test/' + 'F.' + transcription_factor + '.' + test_celltype + '.tab.gz'
 
             with gzip.open(f_out_name, 'w') as fout:
                 for idx, line in enumerate(fin):
@@ -194,7 +197,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', help='batch size', type=int, default=512, required=False)
     parser.add_argument('--config', '-c', help='configuration of model', default=7, type=int, required=False)
     parser.add_argument('--num_epochs', '-ne', help='number of epochs', type=int, default=1, required=False)
-    parser.add_argument('--bin_size', '-bs', help='Sequence bin size (must be an even number >= 200)', type=int, default=200, required=False)
+    parser.add_argument('--sequence_bin_size', '-sbs', help='Sequence bin size (must be an even number >= 200)', type=int, default=200, required=False)
     parser.add_argument('--dnase_bin_size', '-dbs', help='DNASE bin size', type=int, default=200, required=False)
     parser.add_argument('--chipseq_bin_size', '-cbs', help='CHIPSEQ bin size', type=int, default=200, required=False)
     parser.add_argument('--debug', '-dbg', help='Debug the model', action='store_true', required=False)
@@ -212,10 +215,16 @@ if __name__ == '__main__':
                         debug=args.debug, num_dnase_features=10)
     '''
     if args.model == 'KC':
-        model = KConvNet(args.bin_size, args.num_epochs, args.batch_size, 4, args.verbose, args.config)
+        model = KConvNet(sequence_bin_size=args.sequence_bin_size,
+                         dnase_bin_size=args.dnase_bin_size,
+                         num_epochs=args.num_epochs,
+                         batch_size=args.batch_size,
+                         num_channels=4,
+                         verbose=args.verbose,
+                         config=args.config)
 
     transcription_factors = args.transcription_factors.split(',')
-    evaluator = Evaluator('../data/', bin_size=args.bin_size, dnase_bin_size=args.bin_size,
+    evaluator = Evaluator('../data/', sequence_bin_size=args.sequence_bin_size, dnase_bin_size=args.dnase_bin_size,
                           chipseq_bin_size=args.chipseq_bin_size, debug=args.debug,
                           num_train_celltypes=args.num_train_celltypes)
     for transcription_factor in transcription_factors:

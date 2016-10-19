@@ -7,21 +7,25 @@ from keras.optimizers import Adam
 
 class KMultiConvNet:
 
-    def __init__(self, config=7, bin_size=200, num_chunks=10, verbose=False, num_channels=4, num_epochs=1, batch_size=512):
+    def __init__(self, config=7, bin_size=200, verbose=False, num_channels=4, num_epochs=1, batch_size=512,
+                 sequence_bin_size=200, dnase_bin_size=200):
         self.config = config
         self.bin_size = bin_size
         self.tf_ratio = tf.placeholder(dtype=tf.float32)
         self.datagen = DataGenerator()
-        self.num_chunks = num_chunks
         self.num_epochs = num_epochs
         self.segment = 'train'
         self.num_channels = num_channels
         self.verbose = verbose
         self.batch_size = batch_size
         self.model = self.get_model()
+        self.sequence_bin_size = sequence_bin_size
+        self.dnase_bin_size = dnase_bin_size
 
     def set_segment(self, segment):
         self.segment = segment
+
+    '''
 
     def get_loss(self, labels, logits):
         logits = tf.reshape(logits, [-1])
@@ -50,70 +54,155 @@ class KMultiConvNet:
         loss_unbound = tf.div(entropy_unbound, num_unbound)
         return tf.add(loss_bound, loss_unbound)
 
+    '''
+
     def get_model(self):
         sequence_model = Sequential()
-        sequence_model.add(Convolution1D(32, 15, input_shape=(self.bin_size, self.num_channels)))
+        sequence_model.add(Convolution1D(15, 15, input_shape=(self.sequence_bin_size, self.num_channels)))
         sequence_model.add(MaxPooling1D(35, 35))
         sequence_model.add(Activation('relu'))
         sequence_model.add(Flatten())
         sequence_model.add(Dense(100, activation="relu"))
 
+        if self.config == 1:
+            sequence_model.add(Dense(32, activation='sigmoid'))
+            sequence_model.compile(Adam(), 'binary_crossentropy')
+            return sequence_model
+
         dnase_model = Sequential()
-        dnase_model.add(Dense(100, input_dim=10, activation="relu"))
+        dnase_model.add(Convolution1D(15, 15, input_shape=(self.dnase_bin_size, 1)))
+        dnase_model.add(MaxPooling1D(35, 35))
+        dnase_model.add(Activation('relu'))
+        dnase_model.add(Flatten())
+        dnase_model.add(Dense(100, activation="relu"))
 
         model = Sequential()
         model.add(Merge([sequence_model, dnase_model], "concat"))
         model.add(Dense(1000, activation="relu"))
         model.add(Dropout(0.5))
         model.add(Dense(32, activation='sigmoid'))
-        model.compile(Adam(), self.get_loss)
+        model.compile(Adam(0.001), 'binary_crossentropy')
 
         return model
 
-    def generate_batch(self, celltype):
+    def generate_batches(self, celltypes_train):
+        trans_f_idx = self.datagen.get_trans_f_lookup()[self.transcription_factor]
+
+        sequence_bin_correction = (self.sequence_bin_size - self.bin_size) / 2
+        dnase_bin_correction = (self.dnase_bin_size - self.bin_size) / 2
+        ids = self.datagen.get_dnase_accesible_ids(celltypes_train, False)#np.array(range(self.datagen.train_length))
+        start_positions = np.array(self.datagen.get_positions_for_ids(ids, 'train'))
+        assert(ids.size == start_positions.size)
+        sequence_all = np.load(os.path.join(self.datagen.save_dir, 'sequence_' + 'train' + '.npy'))
+
+        labels_all = []
+        dnase_all = []
+
+        for c_idx, celltype in enumerate(celltypes_train):
+            labels_all.append(self.datagen.get_y(celltype)[:, trans_f_idx])
+            dnase_all.append(np.load(os.path.join(self.datagen.save_dir,
+                                                        'dnase_fold_%s_%s.npy' % ('train', celltype))))
         while True:
-            for chunk_id in range(1, self.num_chunks + 1):
-                ids = range((chunk_id - 1) * 1000000, min(chunk_id * 1000000, self.datagen.train_length))
-                X = self.datagen.get_sequece_from_ids(ids, self.segment, self.bin_size)
-                y = self.datagen.get_y(celltype)[ids]
-                dnase_features = self.datagen.get_dnase_features_from_ids(ids,
-                                                                          self.segment,
-                                                                          celltype,
-                                                                          200)
-                num_examples = len(ids)
-                for i in range(0, num_examples, self.batch_size):
-                    yield ([X[i:i+self.batch_size], dnase_features[i:i+self.batch_size]], y[i:i+self.batch_size])
+            shuffle_idx = np.arange(len(ids))
+            np.random.shuffle(shuffle_idx)
+            shuffled_ids = ids[shuffle_idx]
+            shuffled_start_positions = start_positions[shuffle_idx]
 
-    def fit(self, celltypes_train):
-        self.model.fit_generator(self.generate_batch(celltypes_train),
-                                 min(self.datagen.train_length, self.num_chunks*1000000),
-                                 1, verbose=1 if self.verbose else 0)
+            for i in range(0, len(ids), self.batch_size):
+                celltype_idx = np.random.randint(0, len(celltypes_train))
 
-    def predict(self, celltype, validation=False):
-        '''
-                Run trained model
-                :return: predictions
-                '''
-        dnase_features_total = self.datagen.get_dnase_features(self.segment, celltype, self.bin_size)
+                start_positions_batch = shuffled_start_positions[i:i + self.batch_size]
+                batch_labels = labels_all[celltype_idx][shuffled_ids[i:i + self.batch_size]]
+                batch_sequence = np.zeros((start_positions_batch.size, self.sequence_bin_size, self.num_channels), dtype=np.float32)
+                batch_dnase = np.zeros((start_positions_batch.size, self.dnase_bin_size, 1), dtype=np.float32)
+                for j, index in enumerate(start_positions_batch):
+                    sequence_sl = slice(index-sequence_bin_correction, index+self.bin_size+sequence_bin_correction)
+                    batch_sequence[j] = sequence_all[sequence_sl]
+                    dnase_sl = slice(index-dnase_bin_correction, index+self.bin_size+dnase_bin_correction)
+                    batch_dnase[j] = np.reshape(dnase_all[celltype_idx][dnase_sl], (-1, 1))
 
-        if self.segment == 'train':
+                if self.config == 1:
+                    yield (batch_sequence, batch_labels)
+                else:
+                    yield ([batch_sequence, batch_labels], batch_labels)
+
+    def fit(self, celltypes_train, celltype_test):
+        trans_f_idx = self.datagen.get_trans_f_lookup()[self.transcription_factor]
+
+        valid_ids = range(2702470)
+        y_valid = self.datagen.get_y(celltype_test)[valid_ids, trans_f_idx]
+
+        num_bound = 0
+        num_unbound = 0
+        for celltype in celltypes_train:
+            y = self.datagen.get_y(celltype)[:, trans_f_idx]
+            num_bound += np.count_nonzero(y)
+            num_unbound += y.shape[0] - num_bound
+
+        ratio = num_unbound / num_bound
+
+        self.model.fit_generator(
+            self.generate_batches(celltypes_train),
+            1000000,#self.datagen.train_length,
+            self.num_epochs,
+            1 if self.verbose else 0,
+            class_weight={0: 1.0, 1: ratio},
+            max_q_size=10,
+            nb_worker=6,
+        )
+
+    def generate_test_batches(self, celltype, segment, validation=False):
+        if segment == 'train':
             num_test_indices = 51676736
-        if self.segment == 'ladder':
+        if segment == 'ladder':
             num_test_indices = 8843011
-        if self.segment == 'test':
+        if segment == 'test':
             num_test_indices = 60519747
         if validation:
             num_test_indices = 2702470
 
-        stride = 1000000
-        predictions = []
+        while True:
+            sequence_bin_correction = (self.sequence_bin_size - self.bin_size) / 2
+            dnase_bin_correction = (self.dnase_bin_size - self.bin_size) / 2
 
-        for start in range(0, num_test_indices, stride):
-            ids = range(start, min(start + stride, num_test_indices))
-            X = self.datagen.get_sequece_from_ids(ids, self.segment, self.bin_size)
-            dnase_features = dnase_features_total[ids]
+            sequence_all = np.load(os.path.join(self.datagen.save_dir, 'sequence_' + segment + '.npy'))
+            dnase = np.load(os.path.join(self.datagen.save_dir, 'dnase_fold_%s_%s.npy' % (segment, celltype)))
 
-            prediction = self.model.predict((X, dnase_features), batch_size=1024)
-            predictions.extend(prediction)
-        predictions = np.array(predictions)
+            ids = range(num_test_indices)
+            start_positions = self.datagen.get_positions_for_ids(ids, segment)
+
+            for i in range(0, len(ids), self.batch_size):
+                start_positions_batch = start_positions[i:i + self.batch_size]
+                batch_sequence = np.zeros((len(start_positions_batch), self.sequence_bin_size, self.num_channels))
+                batch_dnase = np.zeros((len(start_positions_batch), self.dnase_bin_size, 1))
+                for j, index in enumerate(start_positions_batch):
+                    sequence_sl = slice(index - sequence_bin_correction,
+                                        index + self.bin_size + sequence_bin_correction)
+                    batch_sequence[j] = sequence_all[sequence_sl]
+                    dnase_sl = slice(index - dnase_bin_correction, index + self.bin_size + dnase_bin_correction)
+                    batch_dnase[j] = np.reshape(dnase[dnase_sl], (-1, 1))
+
+                if self.config == 1:
+                    yield batch_sequence
+                else:
+                    yield [batch_sequence, batch_dnase]
+
+    def predict(self, celltype, segment, validation=False):
+        '''
+        Run trained model
+        :return: predictions
+        '''
+
+        if segment == 'train':
+            num_test_indices = 51676736
+        if segment == 'ladder':
+            num_test_indices = 8843011
+        if segment == 'test':
+            num_test_indices = 60519747
+        if validation:
+            num_test_indices = 2702470
+
+        predictions = self.model.predict_generator(self.generate_test_batches(celltype, segment, validation),
+                                                   num_test_indices, 10, 6)
         return predictions
+

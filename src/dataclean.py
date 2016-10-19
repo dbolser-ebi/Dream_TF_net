@@ -7,6 +7,13 @@ import re
 import shutil
 
 
+def make_relaxed_dnase_peak_naming_consistent(fpath):
+    if os.path.exists(fpath+'DNASE.IMR90.relaxed.narrowPeak.gz'):
+        print 'Renaming', 'DNASE.IMR90.relaxed.narrowPeak.gz'
+        shutil.move(fpath+'DNASE.IMR90.relaxed.narrowPeak.gz',
+                    fpath+'DNASE.IMR-90.relaxed.narrowPeak.gz')
+
+
 def make_dnase_peak_naming_consistent(fpath):
     if os.path.exists(fpath+'DNASE.IMR90.conservative.narrowPeak.gz'):
         print 'Renaming', 'DNASE.IMR90.conservative.narrowPeak.gz'
@@ -33,9 +40,10 @@ def make_rnaseq_naming_consistent(fpath):
 
 
 def make_naming_consistent(fpath):
-    make_dnase_peak_naming_consistent(os.path.join(fpath,'dnase_peaks_conservative/'))
-    make_dnase_fold_naming_consistent(os.path.join(fpath,'dnase_fold_coverage/'))
-    make_rnaseq_naming_consistent(os.path.join(fpath,'rnaseq/'))
+    make_relaxed_dnase_peak_naming_consistent(os.path.join(fpath, 'dnase_peaks_relaxed/'))
+    make_dnase_peak_naming_consistent(os.path.join(fpath, 'dnase_peaks_conservative/'))
+    make_dnase_fold_naming_consistent(os.path.join(fpath, 'dnase_fold_coverage/'))
+    make_rnaseq_naming_consistent(os.path.join(fpath, 'rnaseq/'))
 
 
 def clean_duplicate(num, path):
@@ -78,14 +86,10 @@ def rename_folders(fpath):
             print 'Moving', directory, 'to', name_map[directory]
             shutil.move(dirpath, os.path.join(fpath, name_map[directory]))
 
-
-def main():
+if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--path', help='path to data directory (i.e. ../data/)', required=True)
     args = parser.parse_args()
+    make_naming_consistent(args.path)
     clean_folder(args.path)
     rename_folders(args.path)
-    make_naming_consistent(args.path)
-
-if __name__ == '__main__':
-    main()

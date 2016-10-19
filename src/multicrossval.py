@@ -33,7 +33,7 @@ class Evaluator:
     def make_predictions(self):
 
         for leaderboard in [True, False]:
-            self.model.set_segment('ladder' if leaderboard else 'test')
+            segment = 'ladder' if leaderboard else 'test'
             tf_leaderboard = {
                 'ARID3A': ['K562'],
                 'ATF2': ['K562'],

@@ -6,13 +6,11 @@ import argparse
 import gzip
 import pdb
 import pandas as pd
-from random import shuffle
 import random
 from enum import Enum
 from wiggleReader import *
 from multiprocessing import Process
-from bisect import *
-from sklearn.preprocessing import StandardScaler
+import bisect
 
 
 class CrossvalOptions(Enum):
@@ -27,7 +25,7 @@ class DataGenerator:
         self.dna_peak_c_path = 'dnase_peaks_conservative/'
         self.label_path = os.path.join(self.datapath, 'chipseq_labels/')
         self.hg19 = Fasta(os.path.join(self.datapath, 'annotations/hg19.genome.fa'))
-        self.sequence_length = 200
+        self.bin_size = 200
         self.correction = 400
 
         self.train_length = 51676736
@@ -188,35 +186,6 @@ class DataGenerator:
             lookup[celltype] = idx
         return lookup
 
-    def get_sequece_from_ids(self, ids, segment, bin_size=600):
-        id_to_position = {}
-        for i, id in enumerate(ids):
-            id_to_position[id] = i
-
-        X = np.zeros((len(ids), bin_size, self.num_channels), dtype=np.float16)
-        chunk_lookup = {}
-        for id in ids:
-            chunk_id = (id / self.chunk_size) * self.chunk_size
-            if chunk_id not in chunk_lookup:
-                chunk_lookup[chunk_id] = []
-            chunk_lookup[chunk_id].append(id)
-        for chunk_id in chunk_lookup.keys():
-            chunk = np.load(os.path.join(self.save_dir,
-                                         'segment_%s_bin_size_%d_chunk_id_%d.npy')
-                            % (segment, bin_size, chunk_id))
-            ids = chunk_lookup[chunk_id]
-            x_idxs = map(lambda x: id_to_position[x], ids)
-            ids_corrected = map(lambda x: x - chunk_id, ids)
-            X[x_idxs] = chunk[ids_corrected]
-
-        return X
-
-    def get_dnase_features_from_ids(self, ids, segment, celltype, dnase_bin_size=600):
-        return np.load(os.path.join(self.save_dir, 'dnase_fold_%s_%s_%d.npy' % (segment, celltype, dnase_bin_size)))[ids]
-
-    def get_dnase_features(self, segment, celltype, dnase_bin_size=600):
-        return np.load(os.path.join(self.save_dir, 'dnase_fold_%s_%s_%d.npy' % (segment, celltype, dnase_bin_size)))
-
     def get_y(self, celltype):
         return np.load('../data/preprocess/features/y_%s.npy' % celltype)
 
@@ -316,10 +285,63 @@ class DataGenerator:
         pfm += pseudocounts
         norm_pwm = pfm / pfm.sum(axis=1)[:, np.newaxis]
         return norm_pwm
-        #return np.log2(norm_pwm / 0.25)
+        #return np.log2(norm_pwm / 0.25)z
 
-    def get_dnase_accesible_idxs(self, celltype):
-        return
+    def get_DNAse_peak_list(self, celltype, conservative=True):
+
+        peak_type = 'conservative' if conservative else 'relaxed'
+
+        with gzip.open(os.path.join(self.datapath,
+                                    'dnase_peaks_{0}/DNASE.{1}.{0}.narrowPeak.gz'.format(peak_type, celltype))) as f_handler:
+            l = []
+            for line in f_handler:
+                tokens = line.split()
+                chromosome = tokens[0]
+                start = int(tokens[1])
+                stop = int(tokens[2])
+                l.append((chromosome, start, stop))
+            l.sort()
+            return l
+
+    def get_dnase_accesible_ids_for_celltype(self, celltype, conservative=True):
+        peak_type = 'conservative' if conservative else 'relaxed'
+        save_path = os.path.join(self.save_dir, 'dnase_%s_peaks_%s.npy' % (peak_type, celltype))
+        if os.path.exists(save_path):
+            ids = np.load(save_path)
+        else:
+            dnase_list = self.get_DNAse_peak_list(celltype, conservative)
+            ids = []
+
+            with gzip.open(os.path.join(self.datapath,
+                                        'annotations/train_regions.blacklistfiltered.bed.gz')) as fin:
+                for id, line in enumerate(fin):
+                    tokens = line.split()
+                    chromosome = tokens[0]
+                    start = int(tokens[1])
+
+                    dnase_pos = bisect.bisect_left(dnase_list, (chromosome, start, start + self.bin_size))
+                    # check left
+                    if dnase_pos < len(dnase_list):
+                        dnase_chr, dnase_start, dnase_end = dnase_list[dnase_pos]
+                        if dnase_start <= start + self.bin_size and start <= dnase_end:
+                            ids.append(id)
+                    # check right
+                    if dnase_pos + 1 < len(dnase_list):
+                        dnase_chr, dnase_start, dnase_end = dnase_list[dnase_pos + 1]
+                        if dnase_start <= start + self.bin_size and start <= dnase_end:
+                            ids.append(id)
+            ids = np.array(ids)
+            np.save(save_path, ids.astype(np.int32))
+
+        return ids.tolist()
+
+    def get_dnase_accesible_ids(self, celltypes, conservative=True):
+        ids = []
+        for celltype in celltypes:
+            ids.extend(self.get_dnase_accesible_ids_for_celltype(celltype, conservative))
+        ids = np.array(list(set(ids))).astype(np.int32)
+
+        return ids
 
     def get_positions_for_ids(self, ids, segment):
         start_positions = []
@@ -333,7 +355,7 @@ class DataGenerator:
                 offset += ((end-start)-150)/50
         positions = []
         for id in ids:
-            jumps = bisect(start_positions, id)-1
+            jumps = bisect.bisect(start_positions, id)-1
             positions.append(self.correction+jumps*(150+self.correction*2)+id*50)
         return positions
 
@@ -431,7 +453,8 @@ class DataGenerator:
                 dnase_features[offset:offset+end-start+self.correction*2] = track
                 offset += end-start+self.correction*2
 
-            np.save(os.path.join(self.save_dir, 'dnase_fold_%s_%s' % (segment, celltype)), dnase_features)
+            np.save(os.path.join(self.save_dir, 'dnase_fold_%s_%s' % (segment, celltype)),
+                    dnase_features.astype(np.float16))
 
         with open('../data/annotations/%s_regions.blacklistfiltered.merged.bed' % segment) as fin:
             lines = fin.read()
