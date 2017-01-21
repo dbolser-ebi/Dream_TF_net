@@ -9,8 +9,9 @@ import pandas as pd
 import random
 from enum import Enum
 from wiggleReader import *
-from multiprocessing import Process
+from multiprocessing import Process, Queue
 import bisect
+from sequence import *
 
 
 class CrossvalOptions(Enum):
@@ -59,6 +60,8 @@ class DataGenerator:
                     celltypes = header_tokens[3:]
                 break
         celltypes = list(set(celltypes))
+        if 'SK-N-SH' in celltypes:
+            celltypes.remove('SK-N-SH')
         return celltypes
 
     def get_trans_fs(self):
@@ -79,6 +82,8 @@ class DataGenerator:
         for f in [f for f in os.listdir(self.datapath+self.dna_peak_c_path)]:
             celltypes.append(f.split('.')[1])
         celltypes = list(set(celltypes))
+        if 'SK-N-SH' in celltypes:
+            celltypes.remove('SK-N-SH')
         return celltypes
 
     def get_celltypes_for_tf(self, transcription_factor):
@@ -155,7 +160,7 @@ class DataGenerator:
             y = np.max(y, axis=1)
             positions = np.where(y == 1)[0]
             np.save(save_path, positions)
-        return positions
+        return positions.tolist()
 
     def get_bound_for_trans_f(self, trans_f):
         trans_f_lookup = self.get_trans_f_lookup()
@@ -172,7 +177,20 @@ class DataGenerator:
             positions = list(set(positions))
             np.save(save_path, np.array(positions, dtype=np.int32))
 
-        return positions
+        return positions.tolist()
+
+    def get_bound_positions_for_trans_f_celltype(self, trans_f, celltype):
+        trans_f_lookup = self.get_trans_f_lookup()
+        save_path = os.path.join(self.save_dir, 'bound_positions_%s_%s.npy' % (trans_f, celltype))
+        if os.path.exists(save_path):
+            positions = np.load(save_path)
+        else:
+            print "Getting bound locations for transcription factor %s, celltype %s" % (trans_f, celltype)
+            y = np.load(os.path.join(self.save_dir, 'y_%s.npy' % celltype))
+            positions = (np.where(y[:, trans_f_lookup[trans_f]] == 1)[0]).flatten().astype(np.int32)
+            np.save(save_path, positions)
+        return positions.tolist()
+
 
     def get_trans_f_lookup(self):
         lookup = {}
@@ -180,11 +198,22 @@ class DataGenerator:
             lookup[trans_f] = idx
         return lookup
 
+    def get_reverse_trans_f_lookup(self):
+        trans_f_lookup = self.get_trans_f_lookup()
+        lookup = {}
+        for trans_f in trans_f_lookup.keys():
+            lookup[trans_f_lookup[trans_f]] = trans_f
+        return lookup
+
     def get_celltype_lookup(self):
         lookup = {}
         for idx, celltype in enumerate(self.get_celltypes()):
             lookup[celltype] = idx
         return lookup
+
+    def get_reverse_celltype_lookup(self):
+        inv_map = {v: k for k, v in self.get_celltype_lookup().iteritems()}
+        return inv_map
 
     def get_y(self, celltype):
         return np.load('../data/preprocess/features/y_%s.npy' % celltype)
@@ -339,9 +368,18 @@ class DataGenerator:
         ids = []
         for celltype in celltypes:
             ids.extend(self.get_dnase_accesible_ids_for_celltype(celltype, conservative))
-        ids = np.array(list(set(ids))).astype(np.int32)
+        ids = list(set(ids))
 
         return ids
+
+    def get_dnase(self, segment, celltype):
+        return np.load(os.path.join(self.save_dir, 'dnase_fold_%s_%s.npy' % (segment, celltype)))
+
+    def get_labels(self, celltype):
+        return np.load(os.path.join(self.save_dir, 'y_%s.npy' % celltype))
+
+    def get_chipseq_signal(self, celltype):
+        return np.load(os.path.join(self.save_dir, 'y_quant_%s.npy' % celltype))
 
     def get_positions_for_ids(self, ids, segment):
         start_positions = []
@@ -359,6 +397,19 @@ class DataGenerator:
             positions.append(self.correction+jumps*(150+self.correction*2)+id*50)
         return positions
 
+    def get_complement(self, one_hot_sequence):
+        complement = np.zeros(one_hot_sequence.shape, dtype=np.float32)
+        a_idx = np.where(one_hot_sequence[:, 0] == 1)[0]
+        c_idx = np.where(one_hot_sequence[:, 1] == 1)[0]
+        g_idx = np.where(one_hot_sequence[:, 2] == 1)[0]
+        t_idx = np.where(one_hot_sequence[:, 3] == 1)[0]
+
+        complement[a_idx, 3] = 1
+        complement[c_idx, 2] = 1
+        complement[g_idx, 1] = 1
+        complement[t_idx, 0] = 1
+        return complement
+
     ##### DATA GENERATION ##############################################################################
 
     def generate_sequence(self, segment):
@@ -371,7 +422,7 @@ class DataGenerator:
                 start = int(tokens[1])
                 end = int(tokens[2])
                 num_positions += end-start+self.correction*2
-        X = np.zeros((num_positions, 4), dtype=np.float16)
+        X = np.zeros((num_positions, 4), dtype=np.bool)
         offset = 0
         with open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.merged.bed' % segment)) as fin:
             for line in fin:
@@ -381,21 +432,85 @@ class DataGenerator:
                 end = int(tokens[2])
                 sequence = self.hg19[chromosome][start-self.correction:end+self.correction]
                 print "len sequence", len(sequence), end-start+self.correction*2
-                sequence_one_hot = self.sequence_to_one_hot(np.array(list(sequence)))
-                X[offset:offset+end-start+self.correction*2] = sequence_one_hot
+                #sequence_encoding = one_hot_encode_sequence(sequence)
+                sequence_encoding = self.sequence_to_one_hot(np.array(list(sequence)))
+                X[offset:offset+end-start+self.correction*2] = sequence_encoding
                 offset += end - start + self.correction*2
         save_path = os.path.join(self.save_dir, 'sequence_' + segment + '.npy')
         np.save(save_path, X)
 
+    def generate_shape(self, segment):
+        if segment not in ['train', 'ladder', 'test']:
+            raise Exception('Please specify the segment')
+        num_positions = 0
+        with open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.merged.bed' % segment)) as fin:
+            for line in fin:
+                tokens = line.split()
+                start = int(tokens[1])
+                end = int(tokens[2])
+                num_positions += end-start+self.correction*2
+        X = np.zeros((num_positions, 4), dtype=np.float16)
+        offset = 0
+        f_mgw = open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.MGW2'))
+        f_helt = open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.HelT2'))
+        f_roll = open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.Roll2'))
+        f_prot = open(os.path.join(self.datapath, 'annotations/hg19.genome.fa.ProT2'))
+
+        mgw = f_mgw.read()
+        helt = f_helt.read()
+        roll = f_roll.read()
+        prot = f_prot.read()
+
+        with open(os.path.join(self.datapath,
+                                   'annotations/%s_regions.blacklistfiltered.merged.bed' % segment)) as fin:
+
+            curr_chr = '-1'
+
+            for line in fin:
+                tokens = line.split()
+                chromosome = tokens[0]
+                start = int(tokens[1])
+                end = int(tokens[2])
+
+                if curr_chr != chromosome:
+                    curr_chr = chromosome
+                    chr_order = ['chr10', 'chr11', 'chr12', 'chr13', 'chr14', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chr1',
+                     'chr20', 'chr21', 'chr22', 'chr2', 'chr3', 'chr4', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9', 'chrM',
+                     'chrX', 'chrY']
+                    idx = chr_order.index(curr_chr)*2+1
+                    mgw_chunk = np.array(mgw.split()[idx].split(',')[:-1], dtype=np.float16)
+                    helt_chunk = np.array(['0']+helt.split()[idx].split(',')[:-1], dtype=np.float16)
+                    roll_chunk = np.array(['0']+roll.split()[idx].split(',')[:-1], dtype=np.float16)
+                    prot_chunk = np.array(prot.split()[idx].split(',')[:-1], dtype=np.float16)
+
+                print "len sequence", len(mgw_chunk), len(helt_chunk), len(roll_chunk), len(prot_chunk), end - start + self.correction * 2
+
+                X[offset:offset + end - start + self.correction * 2, 0] = mgw_chunk[start-self.correction:end+self.correction]
+                X[offset:offset + end - start + self.correction * 2, 1] = helt_chunk[start-self.correction:end+self.correction]
+                X[offset:offset + end - start + self.correction * 2, 2] = roll_chunk[start-self.correction:end+self.correction]
+                X[offset:offset + end - start + self.correction * 2, 3] = prot_chunk[start-self.correction:end+self.correction]
+                offset += end - start + self.correction * 2
+
+        save_path = os.path.join(self.save_dir, 'shape_' + segment + '.npy')
+        np.save(save_path, X)
+
+        f_mgw.close()
+        f_helt.close()
+        f_roll.close()
+        f_prot.close()
+
     def generate_y(self):
         trans_f_lookup = self.get_trans_f_lookup()
         celltype_lookup = self.get_celltype_lookup()
-        y = -1 * np.ones((self.train_length, self.num_trans_fs, self.num_celltypes), dtype=np.float16)
+        y = np.ones((self.train_length, self.num_trans_fs, self.num_celltypes), dtype=np.int8)
+        y *= -1
 
         for transcription_factor in self.get_trans_fs():
             path = os.path.join(self.label_path, '%s.train.labels.tsv.gz' % transcription_factor)
             labels = pd.read_csv(path, delimiter='\t')
             celltype_names = list(labels.columns[3:])
+            if 'SK-N-SH' in celltype_names:
+                celltype_names.remove('SK-N-SH')
 
             for celltype in celltype_names:
                 celltype_labels = np.array(labels[celltype])
@@ -405,6 +520,8 @@ class DataGenerator:
                 y[ambiguous_indices, trans_f_lookup[transcription_factor], celltype_lookup[celltype]] = 0
                 bound_indices = np.where(celltype_labels == 'B')
                 y[bound_indices, trans_f_lookup[transcription_factor], celltype_lookup[celltype]] = 1
+
+        np.save(os.path.join(self.save_dir, 'y_full.npy'), y)
 
         for celltype in self.get_celltypes():
             np.save(os.path.join(self.save_dir, 'y_%s.npy' % celltype),
@@ -480,18 +597,95 @@ class DataGenerator:
                 map(lambda x: x.start(), processes[i:i + num_processes])
                 map(lambda x: x.join(), processes[i:i + num_processes])
 
-    def generate_shape(self):
-        return
+    def generate_chipseq(self, num_processes, num_bins=10):
+        def get_ChIPseq_fold_track(transcription_factor, celltype, chromosome, left, right):
+            fpath = os.path.join(self.datapath, 'chipseq_fold_change_signal/ChIPseq.%s.%s.fc.signal.train.bw' %
+                                 (celltype, transcription_factor))
+            process = Popen(["wiggletools", "seek", chromosome, str(left), str(right), fpath],
+                            stdout=PIPE)
+            (wiggle_output, _) = process.communicate()
+            track = np.zeros((right - left,), dtype=np.float32)
+            position = 0
+            for line in split_iter(wiggle_output):
+                tokens = line.split()
+                if line.startswith('fixedStep'):
+                    continue
+                elif line.startswith('chr'):
+                    start = int(tokens[1]) + 1
+                    end = int(tokens[2])
+                    length = end - start + 1
+                    value = float(tokens[3])
+                    track[position:position + length] = value
+                    position += length
+                else:
+                    value = float(tokens[0])
+                    track[position] = value
+                    position += 1
+            return track
 
+        chipseq_dir = os.path.join(self.save_dir, 'chipseq')
+
+        if not os.path.exists(chipseq_dir):
+            os.mkdir(chipseq_dir)
+
+        def ChIPseqSignalProcessor(transcription_factor, celltype):
+            print "generating", transcription_factor, celltype
+            chipseq_features = np.zeros((self.train_length, num_bins), dtype=np.float16)
+            idx = 0
+            with open('../data/annotations/%s_regions.blacklistfiltered.merged.bed' % 'train') as fin:
+                for line in fin:
+                    tokens = line.split()
+                    chromosome = tokens[0]
+                    start = int(tokens[1])
+                    end = int(tokens[2])
+                    track = get_ChIPseq_fold_track(transcription_factor, celltype, chromosome, start,
+                                                   end)
+                    for i in range(start, end - 200 + 1, 50):
+                        sbin = track[i - start:i - start + 200]
+                        bins = np.split(sbin, num_bins)
+                        chipseq_features[idx] = np.mean(bins, axis=1)
+                        idx += 1
+                np.save(os.path.join(chipseq_dir, '%s_%s.npy' % (transcription_factor, celltype)), chipseq_features)
+
+        trans_f_lookup = self.get_trans_f_lookup()
+        celltype_lookup = self.get_celltype_lookup()
+
+        processes = []
+        for transcription_factor in self.get_trans_fs():
+            for celltype in self.get_celltypes():
+                if celltype not in self.get_celltypes_for_tf(transcription_factor):
+                    continue
+                p = Process(target=ChIPseqSignalProcessor, args=(transcription_factor, celltype))
+                processes.append(p)
+
+        for i in range(0, len(processes), num_processes):
+            map(lambda x: x.start(), processes[i:i + num_processes])
+            map(lambda x: x.join(), processes[i:i + num_processes])
+
+        for celltype in self.get_celltypes():
+            y = np.ones((self.train_length, self.num_trans_fs, num_bins), dtype=np.float16)
+            y *= -1
+
+            for fname in os.listdir(chipseq_dir):
+                tokens = fname.split('.')[0].split('_')
+                transcription_factor = tokens[0]
+                celltype_ = tokens[1]
+                if celltype == celltype_:
+                    features = np.load(os.path.join(chipseq_dir, fname))
+                    y[:, trans_f_lookup[transcription_factor]] = features
+
+            np.save(os.path.join(self.save_dir, 'y_quant_%s.npy' % celltype), y)
 
 if __name__ == '__main__':
-
     parser = argparse.ArgumentParser()
     parser.add_argument('--gen_sequence', action='store_true', required=False)
     parser.add_argument('--gen_y', action='store_true', required=False)
     parser.add_argument('--gen_dnase', action='store_true', required=False)
+    parser.add_argument('--gen_shape', action='store_true', required=False)
+    parser.add_argument('--gen_chipseq', action='store_true', required=False)
+
     parser.add_argument('--segment', required=True)
-    parser.add_argument('--num_jobs', type=int, required=False)
+    parser.add_argument('--num_jobs', type=int, default=1, required=False)
 
     args = parser.parse_args()
     datagen = DataGenerator()
@@ -502,3 +696,7 @@ if __name__ == '__main__':
         datagen.generate_y()
     if args.gen_dnase:
         datagen.generate_dnase(args.segment, args.num_jobs)
+    if args.gen_shape:
+        datagen.generate_shape(args.segment)
+    if args.gen_chipseq:
+        datagen.generate_chipseq(args.num_jobs)

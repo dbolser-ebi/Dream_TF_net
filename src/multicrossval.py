@@ -6,23 +6,28 @@ import argparse
 
 
 class Evaluator:
-    def __init__(self, epochs, celltypes, batch_size, num_chunks, model_name, verbose, id):
+    def __init__(self, num_epochs, batch_size, model_name, verbose, id, sequence_bin_size=200, dnase_bin_size=200,
+                 num_train_celltypes=14, randomize_celltypes=False, config=1):
+
+        self.num_train_celltypes = num_train_celltypes
 
         self.datagen = DataGenerator()
+        '''
         if model_name == 'TFC':
             self.model = MultiConvNet('../log/', batch_size=512 if batch_size is None else batch_size, num_epochs=1 if epochs is None else epochs,
                                       sequence_width=200, num_outputs=self.datagen.num_trans_fs,
                                  eval_size=.2, early_stopping=10, num_dnase_features=63, dropout_rate=.25,
                                  config=1, verbose=True, segment='train', learning_rate=0.001,
-                                      name='multiconvnet_' + str(epochs) + str(celltypes) + str(batch_size), id=id,
-                                      num_chunks=num_chunks)
-        elif model_name == 'KC':
-            self.model = KMultiConvNet(num_epochs=epochs, num_chunks=num_chunks, verbose=verbose, batch_size=batch_size)
-        self.celltypes = celltypes
+                                      name='multiconvnet_' + str(epochs) + str(celltypes) + str(batch_size), id=id)
+        '''
+        if model_name == 'KC':
+            self.model = KMultiConvNet(num_epochs=num_epochs, verbose=verbose,
+                                       batch_size=batch_size, sequence_bin_size=sequence_bin_size,
+                                       dnase_bin_size=dnase_bin_size, randomize_celltypes=randomize_celltypes, config=config)
 
     def print_results_tf(self, trans_f, y_test, y_pred):
         trans_f_idx = self.datagen.get_trans_f_lookup()[trans_f]
-        y_pred = y_pred[:, trans_f_idx]
+        y_pred = y_pred[trans_f_idx][:, 2]
         y_test = y_test[:, trans_f_idx]
         print "Results for transcription factor", trans_f
         print 'AU ROC', auroc(y_test.flatten(), y_pred.flatten())
@@ -108,28 +113,29 @@ class Evaluator:
                     fin.close()
 
     def run_benchmark(self):
-        held_out_celltypes = ['MCF-7', 'SK-N-SH', 'PC-3', 'liver', 'induced_pluripotent_stem_cell']
-        test_celltypes = ['MCF-7', 'SK-N-SH']
+        held_out_celltypes = ['MCF-7', 'PC-3', 'liver', 'induced_pluripotent_stem_cell']
+        test_celltypes = ['MCF-7']
         # Training
-        celltypes = self.datagen.get_celltypes()
+        train_celltypes = self.datagen.get_celltypes()
 
-        if self.celltypes.strip().upper() == 'One'.upper():
-            print "running on one celltype"
-            celltypes = ['HepG2']
+        if 'SK-N-SH' in train_celltypes:
+            train_celltypes.remove('SK-N-SH')
 
         for celltype in held_out_celltypes:
             try:
-                celltypes.remove(celltype)
+                train_celltypes.remove(celltype)
             except:
                 continue
 
-        self.model.fit(celltypes)
+        train_celltypes = train_celltypes[:self.num_train_celltypes]
+
+        self.model.fit(train_celltypes)
 
         # Validation
         for celltype in test_celltypes:
             print "Running benchmark for celltype", celltype
             y_test = np.load(os.path.join(self.datagen.save_dir, 'y_%s.npy' % celltype))
-            y_pred = self.model.predict(celltype, True)
+            y_pred = self.model.predict(celltype, 'train', True)
             for trans_f in self.datagen.get_trans_fs():
                 if celltype not in self.datagen.get_celltypes_for_trans_f(trans_f):
                     continue
@@ -138,14 +144,32 @@ class Evaluator:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--num_epochs', '-ne', help='Number of epochs', required=False, type=int)
-    parser.add_argument('--celltypes', '-ct', help='All/One', required=False, default='One')
-    parser.add_argument('--num_chunks', '-nc', help='number of chunks to train on', type=int, default=10,
+    parser.add_argument('--validate', '-v', action='store_true', help='run cross TF validation benchmark',
                         required=False)
-    parser.add_argument('--batch_size', '-batch', help='Batch size', required=False, type=int)
-    parser.add_argument('--model', '-m', help='Model TFC/KC', required=False, default='TFC')
+    parser.add_argument('--ladder', '-l', action='store_true', help='predict TF ladderboard', required=False)
+    parser.add_argument('--test', '-t', action='store_true', help='predict TF final round', required=False)
+    parser.add_argument('--batch_size', '-batch', help='Batch size', required=False, type=int, default=512)
+    parser.add_argument('--model', '-m', help='Model KC', required=False, default='KC')
     parser.add_argument('--verbose', help='verbose optimizer', action='store_true', required=False, default=False)
+    parser.add_argument('--num_train_celltypes', '-ntc', help='Number of celltypes to use for training', type=int, default=10, required=False)
+    parser.add_argument('--randomize_celltypes', '-rc', help='Randomize celltypes over batches', action='store_true', required=False)
+    parser.add_argument('--num_epochs', '-ne', help='number of epochs', type=int, default=1, required=False)
+    parser.add_argument('--sequence_bin_size', '-sbs', help='Sequence bin size (must be an even number >= 200)',
+                        type=int, default=200, required=False)
+    parser.add_argument('--dnase_bin_size', '-dbs', help='DNASE bin size', type=int, default=200, required=False)
+    parser.add_argument('--chipseq_bin_size', '-cbs', help='CHIPSEQ bin size', type=int, default=200, required=False)
+    parser.add_argument('--config', '-c', help='configuration of model', default=7, type=int, required=False)
+
     args = parser.parse_args()
-    evaluator = Evaluator(args.num_epochs, args.celltypes, args.batch_size, args.num_chunks, args.model, args.verbose,
-                          re.sub('[^0-9a-zA-Z]+', "", str(vars(args))))
-    evaluator.run_benchmark()
+    evaluator = Evaluator(num_epochs=args.num_epochs,
+                          batch_size=args.batch_size,
+                          model_name=args.model,
+                          verbose=args.verbose,
+                          id=re.sub('[^0-9a-zA-Z]+', "", str(vars(args))),
+                          sequence_bin_size=args.sequence_bin_size,
+                          dnase_bin_size=args.dnase_bin_size,
+                          num_train_celltypes=args.num_train_celltypes,
+                          randomize_celltypes=args.randomize_celltypes,
+                          config=args.config)
+    if args.validate:
+        evaluator.run_benchmark()

@@ -20,7 +20,8 @@ class DownloadThread(threading.Thread):
 
     def run(self):
         ## get folder
-        folder = self.syn.get(self.folder_id, downloadLocation=self.dest_dir+'/'+self.folder_id)
+        folder = self.syn.get(self.folder_id, downloadLocation=self.dest_dir+'/'+self.folder_id,
+                              ifcollission='overwrite.local')
         print 'Downloading contents of %s folder (%s)\n' % (folder.name, folder.id,)
 
         ## query for child entities
@@ -52,16 +53,16 @@ def main():
     dest_dir = args.l
 
     folder_ids = [
-        'syn6181334', # ChIPseq fold_change_signal +- 200GB
-        'syn6181335', # ChIPseq labels
-        'syn6181337', # ChIPseq peaks conservative
-        'syn6181338', # ChIPseq peaks relaxed
-        #'syn6176232', # DNASE bams +- 2TB
-        'syn6176233', # DNASE fold_coverage_wiggles
-        'syn6176235', # DNASE peaks conservative
-        'syn6176236', # DNASE peaks relaxed
-        'syn6176231', # RNAseq
-        'syn6184307' # annotations
+        #'syn6181334', # ChIPseq fold_change_signal +- 200GB
+        #'syn6181335', # ChIPseq labels
+        #'syn6181337', # ChIPseq peaks conservative
+        #'syn6181338', # ChIPseq peaks relaxed
+        'syn6176232', # DNASE bams +- 2TB
+        #'syn6176233', # DNASE fold_coverage_wiggles
+        #'syn6176235', # DNASE peaks conservative
+        #'syn6176236', # DNASE peaks relaxed
+        #'syn6176231', # RNAseq
+        #'syn6184307' # annotations
                  ]
 
     threads = []

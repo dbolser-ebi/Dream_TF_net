@@ -1,18 +1,20 @@
 from sklearn.metrics import *
 import numpy as np
-from sklearn.metrics import precision_recall_curve, auc
-import rpy2
+from sklearn.metrics import precision_recall_curve, average_precision_score
 import rpy2.robjects.numpy2ri
 rpy2.robjects.numpy2ri.activate()
 import rpy2.robjects as ro
+from scipy.stats import rankdata
 
 
 def print_results(y_test, y_pred):
     #y_pred = rankdata(y_pred).astype(np.float32) / len(y_pred)
     print 'AU ROC', auroc(y_test.flatten(), y_pred.flatten())
+    #print 'AU PRC SK', average_precision_score(y_test.flatten(), y_pred.flatten())
     print 'AU PRC', auprc(y_test.flatten(), y_pred.flatten())
     print 'RECALL AT FDR 0.5', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.50)
     print 'RECALL AT FDR 0.1', recall_at_fdr(y_test.flatten(), y_pred.flatten(), 0.10)
+
 
 def auroc(y_true, y_model):
     try:

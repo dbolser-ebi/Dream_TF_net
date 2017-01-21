@@ -1,4 +1,6 @@
 import sqlite3
+import numpy as np
+np.random.seed(14522124)
 from kerasconvnet import *
 
 
@@ -53,7 +55,7 @@ class Evaluator:
         conn.close()
 
 
-    def make_ladder_predictions(self, model, transcription_factor, unbound_fraction=1.0, leaderboard=True):
+    def make_ladder_predictions(self, model, transcription_factor, leaderboard=True):
         tf_leaderboard = {
             'ARID3A': ['K562'],
             'ATF2': ['K562'],
@@ -101,10 +103,10 @@ class Evaluator:
         }
 
         celltypes = self.datagen.get_celltypes_for_tf(transcription_factor)
+        if 'SK-N-SH' in celltypes:
+            celltypes.remove('SK-N-SH')
 
-        model.set_transcription_factor(transcription_factor)
-
-        model.fit(celltypes, celltypes[-1])
+        model.fit(celltypes, transcription_factor, celltypes[-1])
 
         if leaderboard:
             print "Creating predictions for leaderboard"
@@ -112,8 +114,6 @@ class Evaluator:
             print "Creating predictions for final round"
 
         tf_mapper = tf_leaderboard if leaderboard else tf_final
-
-        part = 'ladder' if leaderboard else 'test'
 
         segment = 'ladder' if leaderboard else 'test'
 
@@ -124,7 +124,7 @@ class Evaluator:
 
             y_pred = model.predict(test_celltype, segment, False)
 
-            fin = gzip.open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.bed.gz' % part))
+            fin = gzip.open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.bed.gz' % segment))
             if not os.path.exists('../results/ladder'):
                 os.mkdir('../results/ladder')
             if not os.path.exists('../results/test'):
@@ -136,25 +136,23 @@ class Evaluator:
 
             with gzip.open(f_out_name, 'w') as fout:
                 for idx, line in enumerate(fin):
-                    print>> fout, str(line.strip()) + '\t' + str(y_pred[idx])
+                    print>> fout, str(line.strip()) + '\t' + str(y_pred[idx][0])
 
             fin.close()
 
     def run_cross_cell_benchmark(self, model, transcription_factor, arguments=""):
-
         print "Running cross celltype benchmark for transcription factor %s" % transcription_factor
-
 
         #--------------- TRAIN
         celltypes = self.datagen.get_celltypes_for_tf(transcription_factor)
-        #random.shuffle(celltypes)
 
-        model.set_transcription_factor(transcription_factor)
+        if 'SK-N-SH' in celltypes:
+            celltypes.remove('SK-N-SH')
 
         celltypes_train = celltypes[1:1+self.num_train_celltypes]
         celltype_test = celltypes[0]
 
-        model.fit(celltypes_train, celltype_test)
+        model.fit(celltypes_train, transcription_factor, celltype_test)
 
         print 'TRAINING COMPLETED'
 
@@ -186,6 +184,7 @@ class Evaluator:
 
 
 if __name__ == '__main__':
+    np.random.seed(14522124)
     parser = argparse.ArgumentParser()
     parser.add_argument('--transcription_factors', '-tfs', help='Comma separated list of transcription factors', required=True)
     parser.add_argument('--model', '-m', help='Choose model [KC]', required=True)
@@ -202,6 +201,7 @@ if __name__ == '__main__':
     parser.add_argument('--chipseq_bin_size', '-cbs', help='CHIPSEQ bin size', type=int, default=200, required=False)
     parser.add_argument('--debug', '-dbg', help='Debug the model', action='store_true', required=False)
     parser.add_argument('--num_train_celltypes', '-ntc', help='Number of celltypes to use for training', type=int, default=10, required=False)
+    parser.add_argument('--randomize_celltypes', '-rc', help='Randomize celltypes over batches', action='store_true', required=False)
     parser.add_argument('--verbose', action='store_true', default=False, required=False)
 
     args = parser.parse_args()
@@ -214,20 +214,24 @@ if __name__ == '__main__':
                         num_chunks=args.num_chunks, id=re.sub('[^0-9a-zA-Z]+', "", str(vars(args))),
                         debug=args.debug, num_dnase_features=10)
     '''
-    if args.model == 'KC':
-        model = KConvNet(sequence_bin_size=args.sequence_bin_size,
-                         dnase_bin_size=args.dnase_bin_size,
-                         num_epochs=args.num_epochs,
-                         batch_size=args.batch_size,
-                         num_channels=4,
-                         verbose=args.verbose,
-                         config=args.config)
 
     transcription_factors = args.transcription_factors.split(',')
-    evaluator = Evaluator('../data/', sequence_bin_size=args.sequence_bin_size, dnase_bin_size=args.dnase_bin_size,
-                          chipseq_bin_size=args.chipseq_bin_size, debug=args.debug,
-                          num_train_celltypes=args.num_train_celltypes)
+
     for transcription_factor in transcription_factors:
+        if args.model == 'KC':
+            model = KConvNet(sequence_bin_size=args.sequence_bin_size,
+                             dnase_bin_size=args.dnase_bin_size,
+                             num_epochs=args.num_epochs,
+                             batch_size=args.batch_size,
+                             num_channels=4,
+                             verbose=args.verbose,
+                             config=args.config,
+                             randomize_celltypes=args.randomize_celltypes,
+                             regression=args.regression)
+
+        evaluator = Evaluator('../data/', sequence_bin_size=args.sequence_bin_size, dnase_bin_size=args.dnase_bin_size,
+                              chipseq_bin_size=args.chipseq_bin_size, debug=args.debug,
+                              num_train_celltypes=args.num_train_celltypes)
         if args.validate:
             evaluator.run_cross_cell_benchmark(model, transcription_factor,
                                                arguments=str(vars(args)).replace('\'', ''))

@@ -234,9 +234,9 @@ class ConvNet:
                                             self.tf_boley_scores: boley_scores_chunk[offset:end],
                                             self.tf_sequence: batch_sequence,
                                             self.tf_dnase_features: dnase_chunk[offset:end, :],
-                                             self.tf_train_labels: batch_labels,
-                                             self.keep_prob: 1 - self.dropout_rate,
-                                             self.tf_ratio: chunk_ratio,
+                                            self.tf_train_labels: batch_labels,
+                                            self.keep_prob: 1 - self.dropout_rate,
+                                            self.tf_ratio: chunk_ratio,
                                              }
 
                                 _, r_loss = \
