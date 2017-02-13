@@ -72,21 +72,22 @@ class Evaluator:
             'TAF1': ['liver']
         }
         for transcription_factor in tf_final.keys():
-            celltype = tf_final[transcription_factor]
-            model.fit([celltype], transcription_factor, celltype)
+            celltypes = tf_final[transcription_factor]
+            model.fit(celltypes, transcription_factor, celltypes[-1])
             segment = 'ladder'
-            y_pred = model.predict(celltype, segment, False)
+            for celltype_test in celltypes:
+                y_pred = model.predict(celltype_test, segment, False)
 
-            fin = gzip.open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.bed.gz' % segment))
-            if not os.path.exists('../results/benchmark'):
-                os.mkdir('../results/benchmark')
-            f_out_name = '../results/benchmark/' + 'B.' + transcription_factor + '.' + celltype + '.tab.gz'
+                fin = gzip.open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.bed.gz' % segment))
+                if not os.path.exists('../results/benchmark'):
+                    os.mkdir('../results/benchmark')
+                f_out_name = '../results/benchmark/' + 'B.' + transcription_factor + '.' + celltype_test + '.tab.gz'
 
-            with gzip.open(f_out_name, 'w') as fout:
-                for idx, line in enumerate(fin):
-                    print>> fout, str(line.strip()) + '\t' + str(y_pred[idx][0])
+                with gzip.open(f_out_name, 'w') as fout:
+                    for idx, line in enumerate(fin):
+                        print>> fout, str(line.strip()) + '\t' + str(y_pred[idx][0])
 
-            fin.close()
+                fin.close()
 
     def make_ladder_predictions(self, model, transcription_factor, leaderboard=True):
         tf_leaderboard = {
@@ -226,7 +227,7 @@ if __name__ == '__main__':
     parser.add_argument('--validate', '-v', action='store_true', help='run cross TF validation benchmark', required=False)
     parser.add_argument('--ladder', '-l', action='store_true', help='predict TF ladderboard', required=False)
     parser.add_argument('--test', '-t', action='store_true', help='predict TF final round', required=False)
-    parser.add_argument('--benchmark', '-b', action='store_true', help='predict benchmark round', required=False)
+    parser.add_argument('--benchmark', action='store_true', help='predict benchmark round', required=False)
     parser.add_argument('--batch_size', help='batch size', type=int, default=512, required=False)
     parser.add_argument('--config', '-c', help='configuration of model', default=7, type=int, required=False)
     parser.add_argument('--num_epochs', '-ne', help='number of epochs', type=int, default=1, required=False)
