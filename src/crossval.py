@@ -55,7 +55,7 @@ class Evaluator:
         conn.close()
 
 
-    def make_within_celltype_prediction(self, model):
+    def make_within_celltype_prediction(self, model, transcription_factor):
         tf_final = {
             'ATF2': ['HepG2'],
             'CTCF': ['PC-3', 'induced_pluripotent_stem_cell'],
@@ -71,23 +71,23 @@ class Evaluator:
             'REST': ['liver'],
             'TAF1': ['liver']
         }
-        for transcription_factor in tf_final.keys():
-            celltypes = tf_final[transcription_factor]
-            model.fit(celltypes, transcription_factor, celltypes[-1])
-            segment = 'ladder'
-            for celltype_test in celltypes:
-                y_pred = model.predict(celltype_test, segment, False)
 
-                fin = gzip.open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.bed.gz' % segment))
-                if not os.path.exists('../results/benchmark'):
-                    os.mkdir('../results/benchmark')
-                f_out_name = '../results/benchmark/' + 'B.' + transcription_factor + '.' + celltype_test + '.tab.gz'
+        celltypes = tf_final[transcription_factor]
+        model.fit(celltypes, transcription_factor, celltypes[-1])
+        segment = 'ladder'
+        for celltype_test in celltypes:
+            y_pred = model.predict(celltype_test, segment, False)
 
-                with gzip.open(f_out_name, 'w') as fout:
-                    for idx, line in enumerate(fin):
-                        print>> fout, str(line.strip()) + '\t' + str(y_pred[idx][0])
+            fin = gzip.open(os.path.join(self.datapath, 'annotations/%s_regions.blacklistfiltered.bed.gz' % segment))
+            if not os.path.exists('../results/benchmark'):
+                os.mkdir('../results/benchmark')
+            f_out_name = '../results/benchmark/' + 'B.' + transcription_factor + '.' + celltype_test + '.tab.gz'
 
-                fin.close()
+            with gzip.open(f_out_name, 'w') as fout:
+                for idx, line in enumerate(fin):
+                    print>> fout, str(line.strip()) + '\t' + str(y_pred[idx][0])
+
+            fin.close()
 
     def make_ladder_predictions(self, model, transcription_factor, leaderboard=True):
         tf_leaderboard = {
@@ -253,6 +253,7 @@ if __name__ == '__main__':
     transcription_factors = args.transcription_factors.split(',')
 
     for transcription_factor in transcription_factors:
+        print "Running transcription factor", transcription_factor
         if args.model == 'KC':
             model = KConvNet(sequence_bin_size=args.sequence_bin_size,
                              dnase_bin_size=args.dnase_bin_size,
@@ -277,4 +278,4 @@ if __name__ == '__main__':
             evaluator.make_ladder_predictions(model, transcription_factor, leaderboard=False)
 
         if args.benchmark:
-            evaluator.make_within_celltype_prediction(model)
+            evaluator.make_within_celltype_prediction(model, transcription_factor)

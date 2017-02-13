@@ -330,7 +330,7 @@ class KConvNet:
     def fit(self, celltypes_train, transcription_factor, celltype_test=None):
         np.random.seed(14522124)
         trans_f_idx = self.datagen.get_trans_f_lookup()[transcription_factor]
-        val_seq, val_dnase, val_lab = self.get_validation_sample(celltype_test, transcription_factor)
+        #val_seq, val_dnase, val_lab = self.get_validation_sample(celltype_test, transcription_factor)
         full_ids = range(self.datagen.train_length)
         random.shuffle(full_ids)
 
@@ -364,7 +364,7 @@ class KConvNet:
                 verbose=0,
                 max_q_size=10,
                 nb_worker=1,
-                callbacks=[VProgbarLogger(val_seq, val_dnase, val_lab, self.config, 1 if self.verbose else 0)],
+                #callbacks=[VProgbarLogger(val_seq, val_dnase, val_lab, self.config, 1 if self.verbose else 0)],
                 pickle_safe=False
             )
             print history.history
@@ -380,7 +380,7 @@ class KConvNet:
             class_weight={0: 1.0, 1: ratio},
             max_q_size=10,
             nb_worker=1,
-            callbacks=[VProgbarLogger(val_seq, val_dnase, val_lab, self.config, 1 if self.verbose else 0)],
+            #callbacks=[VProgbarLogger(val_seq, val_dnase, val_lab, self.config, 1 if self.verbose else 0)],
             pickle_safe=False
         )
         print history.history
