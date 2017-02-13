@@ -25,6 +25,7 @@ class DataGenerator:
         self.datapath = '../data/'
         self.dna_peak_c_path = 'dnase_peaks_conservative/'
         self.label_path = os.path.join(self.datapath, 'chipseq_labels/')
+        self.benchmark_path = os.path.join(self.datapath, 'benchmark_labels/')
         self.hg19 = Fasta(os.path.join(self.datapath, 'annotations/hg19.genome.fa'))
         self.bin_size = 200
         self.correction = 400
@@ -499,14 +500,14 @@ class DataGenerator:
         f_roll.close()
         f_prot.close()
 
-    def generate_y(self):
+    def generate_y(self, include_benchmarking=False):
         trans_f_lookup = self.get_trans_f_lookup()
         celltype_lookup = self.get_celltype_lookup()
         y = np.ones((self.train_length, self.num_trans_fs, self.num_celltypes), dtype=np.int8)
         y *= -1
 
-        for transcription_factor in self.get_trans_fs():
-            path = os.path.join(self.label_path, '%s.train.labels.tsv.gz' % transcription_factor)
+        def update_y(path):
+            print "Generating", path
             labels = pd.read_csv(path, delimiter='\t')
             celltype_names = list(labels.columns[3:])
             if 'SK-N-SH' in celltype_names:
@@ -520,6 +521,16 @@ class DataGenerator:
                 y[ambiguous_indices, trans_f_lookup[transcription_factor], celltype_lookup[celltype]] = 0
                 bound_indices = np.where(celltype_labels == 'B')
                 y[bound_indices, trans_f_lookup[transcription_factor], celltype_lookup[celltype]] = 1
+
+        if include_benchmarking:
+            for transcription_factor in self.get_trans_fs():
+                path = os.path.join(self.benchmark_path, '%s.train.labels.tsv' % transcription_factor)
+                if os.path.exists(path):
+                    update_y(path)
+
+        for transcription_factor in self.get_trans_fs():
+            path = os.path.join(self.label_path, '%s.train.labels.tsv.gz' % transcription_factor)
+            update_y(path)
 
         np.save(os.path.join(self.save_dir, 'y_full.npy'), y)
 
@@ -693,7 +704,7 @@ if __name__ == '__main__':
     if args.gen_sequence:
         datagen.generate_sequence(args.segment)
     if args.gen_y:
-        datagen.generate_y()
+        datagen.generate_y(args.segment == 'benchmark')
     if args.gen_dnase:
         datagen.generate_dnase(args.segment, args.num_jobs)
     if args.gen_shape:

@@ -43,7 +43,7 @@ Replace segment with train, ladder or test to preprocess the data for the train,
 
 Run and train a single task model by running the following command.
 ```
-$ python crossval.py --tfs transcription_factor -v -l -t -m KC -c 7 -ne 5 -sbs 1000 -dbs 1000 -ntc 14 -rc --verbose
+$ python crossval.py -tfs transcription_factor -v -l -t -m KC -c 7 -ne 5 -sbs 1000 -dbs 1000 -ntc 14 -rc --verbose
 ```
 
 Replace transcription_factor with the transcription factor you want to train.
